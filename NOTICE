@@ -1,0 +1,81 @@
+PurrVid · 星喵助手 — Third-Party Notices
+Copyright © 2026 snowtafir
+
+This project is licensed under GPL-3.0 (see LICENSE). It bundles the
+third-party components below; their licenses and corresponding source are
+noted here. The generated builds (dist/PurrVid-firefox-v* /
+dist/PurrVid-chrome-v*) contain identical copies of these vendor files.
+
+================================================================================
+1. FFmpeg n6.0 — GPL build
+================================================================================
+Files:
+  vendor/ffmpeg/ffmpeg-core.js
+  vendor/ffmpeg/ffmpeg-core.wasm
+  vendor/ffmpeg/ffmpeg-core.worker.js
+
+The bundled ffmpeg-core.wasm is a build of FFmpeg version n6.0
+(libavcodec 59.37.100, libavformat 59.27.100), compiled to WebAssembly with
+Emscripten (single-threaded, SIMD128).
+
+Full build configuration embedded in the binary:
+  --target-os=none --arch=x86_32 --enable-cross-compile --disable-asm
+  --disable-stripping --disable-programs --disable-doc --disable-debug
+  --disable-runtime-cpudetect --disable-autodetect --nm=emnm --ar=emar
+  --ranlib=emranlib --cc=emcc --cxx=em++ --objcc=emcc --dep-cc=emcc
+  --extra-cflags='-I/opt/include -O3 -msimd128'
+  --extra-cxxflags='-I/opt/include -O3 -msimd128'
+  --disable-pthreads --disable-w32threads --disable-os2threads
+  --enable-gpl --enable-libx264 --enable-libx265 --enable-libvpx
+  --enable-libmp3lame --enable-libtheora --enable-libvorbis --enable-libopus
+  --enable-zlib --enable-libwebp --enable-libfreetype --enable-libfribidi
+  --enable-libass
+
+Because this build enables GPL components (--enable-gpl, libx264, libx265),
+FFmpeg here is licensed under the GNU General Public License version 2 or
+later (GPL-2.0-or-later), NOT LGPL. This is why the project as a whole is
+distributed under GPL-3.0.
+
+Corresponding source:
+  FFmpeg n6.0 source:
+    https://github.com/FFmpeg/FFmpeg/tree/n6.0
+    https://ffmpeg.org/releases/ffmpeg-6.0.tar.xz
+  Build configuration / scripts (ffmpeg.wasm):
+    https://github.com/ffmpegwasm/ffmpeg.wasm
+
+FFmpeg is a trademark of Fabrice Bellard. This project is not affiliated
+with or endorsed by the FFmpeg project.
+
+GPL-only libraries linked into the wasm:
+  x264 — GPL-2.0-or-later — https://code.videolan.org/videolan/x264
+  x265 — GPL-2.0-or-later — https://bitbucket.org/multicoreware/x265_git
+Other linked libraries (libvpx, libmp3lame, libtheora, libvorbis, libopus,
+zlib, libwebp, libfreetype, libfribidi, libass) retain their respective
+licenses; see the FFmpeg source tree for details.
+
+================================================================================
+2. ffmpeg.wasm wrapper (@ffmpeg/ffmpeg) — MIT
+================================================================================
+File:
+  vendor/ffmpeg/ffmpeg.worker.js
+
+This JavaScript worker wrapper comes from the ffmpeg.wasm project
+(@ffmpeg/ffmpeg version 0.12.1; the bundled core is a 0.12.x build of
+FFmpeg n6.0). The ffmpeg.wasm JavaScript wrapper is MIT-licensed; the
+compiled core it loads is the GPL FFmpeg build described in section 1.
+
+Source:
+  https://github.com/ffmpegwasm/ffmpeg.wasm
+
+================================================================================
+Corresponding source availability
+================================================================================
+All original code of this project is plain ES module source, included both
+in the repository and in the distributed packages (.xpi / .zip). For the
+compiled FFmpeg wasm binary, the corresponding source is the FFmpeg n6.0
+source tree plus the ffmpeg.wasm build configuration/scripts identified
+above, available at the upstream links.
+
+If you cannot obtain the corresponding source from those links, contact the
+maintainer through the repository:
+  https://github.com/snowtafir/PurrVid

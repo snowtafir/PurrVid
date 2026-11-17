@@ -1,0 +1,78 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>PurrVid-星喵助手</title>
+  <style>
+    :root {
+      color-scheme: light;
+      font: 14px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif;
+      color: #25324a;
+    }
+    * { box-sizing: border-box; }
+    body {
+      width: 320px;
+      margin: 0;
+      padding: 16px;
+      background: radial-gradient(circle at 100% 0, #e7eaff, transparent 48%), #f7f9fd;
+    }
+    .head { display: flex; align-items: center; gap: 10px; margin-bottom: 14px; }
+    .head img { width: 34px; height: 34px; border-radius: 9px; }
+    .head h1 { flex: 1; margin: 0; font-size: 16px; letter-spacing: -.3px; }
+    .head h1 .version { margin-left: 6px; font-size: 11px; font-weight: 600; color: #9aa6bc; letter-spacing: 0; vertical-align: middle; }
+    .switch { display: inline-flex; align-items: center; gap: 6px; color: #71809a; font-size: 11px; cursor: pointer; user-select: none; }
+    .switch input { position: absolute; opacity: 0; }
+    .switch .track { position: relative; width: 34px; height: 19px; flex: none; border-radius: 99px; background: #d6dce8; transition: background .18s ease; }
+    .switch .track::after { content: ""; position: absolute; top: 2px; left: 2px; width: 15px; height: 15px; border-radius: 50%; background: #fff; box-shadow: 0 1px 3px rgba(35,48,74,.3); transition: transform .18s ease; }
+    .switch input:checked + .track { background: linear-gradient(135deg, #f45a8d, #d83f80); }
+    .switch input:checked + .track::after { transform: translateX(15px); }
+    .switch input:focus-visible + .track { outline: 2px solid #d86f9d; outline-offset: 2px; }
+    .settings { display: flex; flex-direction: column; gap: 9px; margin-bottom: 12px; }
+    .open-panel { width: 100%; min-height: 34px; margin-bottom: 12px; border: 0; border-radius: 10px; background: linear-gradient(135deg, #f45a8d, #d83f80); color: #fff; font: inherit; font-size: 13px; font-weight: 600; cursor: pointer; }
+    .open-panel:hover { filter: brightness(1.05); }
+    .open-panel:focus-visible { outline: 2px solid #d86f9d; outline-offset: 2px; }
+    .open-panel[hidden] { display: none; }
+    .hint { margin: 0; color: #71809a; font-size: 12px; line-height: 1.7; }
+    .hint strong { color: #b73569; }
+    .status { margin: 10px 0 0; min-height: 16px; color: #b73569; font-size: 11px; }
+    .repo { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-top: 14px; padding-top: 12px; border-top: 1px solid #e4e9f2; }
+    .repo a { color: #52617a; font-size: 12px; font-weight: 600; text-decoration: none; }
+    .repo a:hover { color: #b73569; }
+    .repo-copy { flex: none; padding: 4px 9px; border: 1px solid #e4e9f2; border-radius: 99px; background: #eef1f7; color: #68758e; font: inherit; font-size: 10px; cursor: pointer; }
+    .repo-copy:hover { border-color: #e7b6ce; background: #fff0f6; color: #b73569; }
+    .repo-copy:focus-visible { outline: 2px solid #d86f9d; outline-offset: 2px; }
+  </style>
+</head>
+<body>
+  <div class="head">
+    <img src="icon.png" alt="">
+    <h1>PurrVid · 星喵助手<span id="app-version" class="version"></span></h1>
+  </div>
+
+  <div class="settings">
+    <label class="switch" title="自动嗅探本页媒体请求">
+      <input id="sniff-toggle" type="checkbox" checked>
+      <span class="track" aria-hidden="true"></span>
+      自动嗅探
+    </label>
+    <label class="switch" title="关闭后页面不再显示右下角悬浮按钮，可从本弹窗调出面板">
+      <input id="floating-toggle" type="checkbox" checked>
+      <span class="track" aria-hidden="true"></span>
+      悬浮按钮常驻
+    </label>
+  </div>
+
+  <button id="open-panel" class="open-panel" type="button" hidden>调出面板</button>
+
+  <p class="hint">下载面板已整合到视频页<strong>右下角的悬浮按钮</strong>，点击即可展开，自动嗅探 HLS / DASH / 直连媒体，直接在原页面选择清晰度并下载。请先播放视频以便解析。仅下载你有权保存的内容；DRM 与直播流不支持下载。</p>
+  <p id="status" class="status" role="status" aria-live="polite"></p>
+
+  <div class="repo">
+    <a href="https://github.com/snowtafir/PurrVid" target="_blank" rel="noopener noreferrer">GitHub 仓库</a>
+    <button id="copy-repo" class="repo-copy" type="button">复制地址</button>
+  </div>
+
+  <script src="popup.js"></script>
+</body>
+</html>

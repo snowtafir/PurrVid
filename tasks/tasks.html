@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>下载任务 · 星喵助手</title>
+  <link rel="stylesheet" href="tasks.css">
+</head>
+<body>
+  <main class="page">
+    <header class="page-head">
+      <img class="logo" src="../icon.png" alt="">
+      <div>
+        <h1>下载任务</h1>
+        <p>HLS / DASH 流媒体解析、下载与合并。请保持本页打开直到任务完成。</p>
+      </div>
+    </header>
+
+    <section class="toolbar" aria-label="下载设置">
+      <label class="field">分段并发
+        <select id="concurrency">
+          <option value="3">3</option>
+          <option value="5" selected>5</option>
+          <option value="8">8</option>
+          <option value="12">12</option>
+        </select>
+      </label>
+      <label class="field">HLS 保存格式
+        <select id="hls-format">
+          <option value="mp4" selected>MP4（自动转封装）</option>
+          <option value="ts">原始 TS</option>
+        </select>
+      </label>
+      <button id="clear-finished" class="ghost-button" type="button">清空已结束</button>
+    </section>
+
+    <p id="empty-tip" class="empty-tip">暂无任务。在视频页右下角的助手下载面板中选择资源即可创建任务。</p>
+    <ul id="task-list" class="task-list"></ul>
+
+    <footer class="page-foot">
+      <p>仅支持下载你有权保存的内容；DRM 加密与直播流无法下载。AES-128 加密的 HLS 会自动解密。</p>
+    </footer>
+  </main>
+  <script type="module" src="tasks.js"></script>
+</body>
+</html>

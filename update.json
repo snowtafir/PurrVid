@@ -1,0 +1,17 @@
+{
+  "addons": {
+    "purrvid@example.com": {
+      "updates": [
+        {
+          "version": "1.0.0",
+          "update_link": "https://github.com/snowtafir/PurrVid/releases/download/v1.0.0/PurrVid-firefox-v1.0.0.xpi",
+          "applications": {
+            "gecko": {
+              "strict_min_version": "140.0"
+            }
+          }
+        }
+      ]
+    }
+  }
+}

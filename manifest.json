@@ -1,0 +1,136 @@
+{
+  "name": "PurrVid-星喵助手",
+  "version": "1.0.0",
+  "description": "一只帮你保存网页视频的星空猫娘：在视频页内直接下载你有权保存的 HLS / DASH / 直连媒体。",
+  "manifest_version": 3,
+  "background": {
+    "scripts": [
+      "background/service-worker.js"
+    ],
+    "type": "module"
+  },
+  "content_scripts": [
+    {
+      "js": [
+        "content/loader.js"
+      ],
+      "matches": [
+        "http://*/*",
+        "https://*/*"
+      ],
+      "run_at": "document_start"
+    },
+    {
+      "js": [
+        "content/engine-bootstrap.js"
+      ],
+      "matches": [
+        "http://*/*",
+        "https://*/*"
+      ],
+      "run_at": "document_start",
+      "world": "MAIN"
+    },
+    {
+      "js": [
+        "content/media-sniffer.js"
+      ],
+      "matches": [
+        "http://*/*",
+        "https://*/*"
+      ],
+      "all_frames": true,
+      "run_at": "document_idle"
+    },
+    {
+      "js": [
+        "content/youtube-bridge.js"
+      ],
+      "matches": [
+        "*://*.youtube.com/*",
+        "*://youtube.com/*",
+        "*://youtu.be/*",
+        "*://*.youtube-nocookie.com/*"
+      ],
+      "all_frames": true,
+      "run_at": "document_start",
+      "world": "MAIN"
+    },
+    {
+      "js": [
+        "content/panel-relay.js"
+      ],
+      "matches": [
+        "http://*/*",
+        "https://*/*"
+      ],
+      "run_at": "document_idle"
+    }
+  ],
+  "icons": {
+    "16": "./icon-16.png",
+    "48": "./icon-48.png",
+    "128": "./icon.png"
+  },
+  "action": {
+    "default_title": "PurrVid-星喵助手",
+    "default_icon": "./icon.png",
+    "default_popup": "popup.html"
+  },
+  "permissions": [
+    "clipboardWrite",
+    "activeTab",
+    "scripting",
+    "downloads",
+    "downloads.open",
+    "webRequest",
+    "declarativeNetRequest",
+    "storage",
+    "tabs"
+  ],
+  "host_permissions": [
+    "http://*/*",
+    "https://*/*"
+  ],
+  "web_accessible_resources": [
+    {
+      "resources": [
+        "bilibili-engine.js",
+        "universal-panel.js",
+        "lib/media-utils.js",
+        "lib/m3u8.js",
+        "lib/mpd.js",
+        "lib/ffmpeg-client.js",
+        "lib/youtube.js",
+        "lib/transport.js",
+        "lib/paw.js",
+        "lib/log-console.js",
+        "icon.png",
+        "vendor/ffmpeg/ffmpeg.worker.js",
+        "vendor/ffmpeg/ffmpeg-core.js",
+        "vendor/ffmpeg/ffmpeg-core.worker.js",
+        "vendor/ffmpeg/ffmpeg-core.wasm"
+      ],
+      "matches": [
+        "http://*/*",
+        "https://*/*"
+      ]
+    }
+  ],
+  "content_security_policy": {
+    "extension_pages": "script-src 'self' 'wasm-unsafe-eval'; worker-src 'self'; object-src 'self';"
+  },
+  "browser_specific_settings": {
+    "gecko": {
+      "id": "purrvid@example.com",
+      "update_url": "https://raw.githubusercontent.com/snowtafir/PurrVid/main/update.json",
+      "data_collection_permissions": {
+        "required": ["none"]
+      },
+      "strict_min_version": "140.0"
+    },
+    "gecko_android": {
+      "strict_min_version": "142.0"
+    }
+  }
+}
