@@ -4,6 +4,26 @@
 
 格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## 1.0.1 - 2026-11-18
+
+### 新增
+
+- **统一结构化解析日志**：抽取共享 `lib/log-console.js`，B 站 / 通用 / YouTube 面板共用同款日志控制台；日志含清晰度 / 音轨 / 时长等信息块与可一键复制的清单链接。
+
+### 修复
+
+- B 站与通用面板长标题被截断的问题，标题完整换行显示。
+- B 站下载按钮右侧超出面板边界的问题（统一 `border-box`）。
+- 标题与「下载方式」设置区、下载按钮区间距不一致的问题。
+- 合并下载提示文本错位、合并按钮排列别扭的问题，状态与保存链接跟随按钮行内显示。
+- B 站 DASH 音视频大小一直显示「未知大小」：先按码率 × 时长估算（标注「约」），再以 HEAD 请求实测 `Content-Length` 覆盖。
+
+### 变更
+
+- 自托管更新清单 `gecko.update_url` 改用 jsDelivr 加速链接（`cdn.jsdelivr.net/gh/snowtafir/PurrVid@main/update.json`）。
+- README 的 Firefox 安装链接更新为 AMO 上架页 `addons.mozilla.org/zh-CN/firefox/addon/purrvid/`。
+- 图标以透明底新版 `catgirl.png` 重新生成 16 / 48 / 128 三个尺寸。
+
 ## 1.0.0 - 2026-11-16
 
 首个以 **PurrVid · 星喵助手** 品牌发布的版本（一只帮你保存网页视频的星空猫娘）。

@@ -14,7 +14,7 @@ English · [简体中文](README.zh-CN.md) · [Changelog](CHANGELOG.md)
 ![Firefox 140+](https://img.shields.io/badge/Firefox-140%2B-FF7139?logo=firefoxbrowser&logoColor=white)
 ![Chrome 116+](https://img.shields.io/badge/Chrome-116%2B-4285F4?logo=googlechrome&logoColor=white)
 ![ffmpeg.wasm](https://img.shields.io/badge/ffmpeg-wasm-007808?logo=ffmpeg&logoColor=white)
-![Version](https://img.shields.io/badge/version-1.0.0-blue)
+![Version](https://img.shields.io/badge/version-1.0.1-blue)
 ![License: GPL v3](https://img.shields.io/badge/License-GPL%20v3-blue.svg)
 ![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen)
 
@@ -46,7 +46,7 @@ The whole project is plain ES modules (no bundler, no framework). One shared cod
 
 **Option 1: Install from AMO (recommended)**
 
-Visit [星喵助手 – Firefox Add-on](https://addons.mozilla.org/zh-CN/firefox/addon/%E5%B0%8F%E7%A0%B4%E7%AB%99%E5%8A%A9%E6%89%8B/) and click **Add to Firefox**.
+Visit [PurrVid – Firefox Add-on](https://addons.mozilla.org/zh-CN/firefox/addon/purrvid/) and click **Add to Firefox**.
 
 **Option 2: Install from GitHub Releases**
 

@@ -14,7 +14,7 @@
 ![Firefox 140+](https://img.shields.io/badge/Firefox-140%2B-FF7139?logo=firefoxbrowser&logoColor=white)
 ![Chrome 116+](https://img.shields.io/badge/Chrome-116%2B-4285F4?logo=googlechrome&logoColor=white)
 ![ffmpeg.wasm](https://img.shields.io/badge/ffmpeg-wasm-007808?logo=ffmpeg&logoColor=white)
-![Version](https://img.shields.io/badge/version-1.0.0-blue)
+![Version](https://img.shields.io/badge/version-1.0.1-blue)
 ![License: GPL v3](https://img.shields.io/badge/License-GPL%20v3-blue.svg)
 ![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen)
 
@@ -46,7 +46,7 @@
 
 **方法 1：从 AMO 安装（推荐）**
 
-访问 [星喵助手 – Firefox 附加组件](https://addons.mozilla.org/zh-CN/firefox/addon/%E5%B0%8F%E7%A0%B4%E7%AB%99%E5%8A%A9%E6%89%8B/)，点击 **添加到 Firefox**。
+访问 [PurrVid · 星喵助手 – Firefox 附加组件](https://addons.mozilla.org/zh-CN/firefox/addon/purrvid/)，点击 **添加到 Firefox**。
 
 **方法 2：从 GitHub Release 安装**
 
