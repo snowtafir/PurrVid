@@ -8,6 +8,7 @@
 
 ### 变更
 
+- 优化Chrome/Edge版本构建的最小权限
 - 发布流程调整（功能与 1.0.2 相同）：构建按 AMO 双渠道分包——公开（listed）版清单移除 `gecko.update_url` 以通过上传校验；自托管（unlisted）版版本号追加第四段 `.1` 并保留 `update_url`，`node build.mjs --unlisted` 一键生成，update.json 同步指向 GitHub 带 `-R` 尾缀的 Release。
 
 ## 1.0.2 - 2026-11-18

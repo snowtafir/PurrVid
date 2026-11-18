@@ -8,7 +8,8 @@
 //     （AMO 公开渠道上传校验禁止 update_url，仅自托管渠道允许）
 //   dist/PurrVid-chrome-v{version}   —— 由根 manifest.json 派生 Chrome 清单：
 //     background.scripts → background.service_worker
-//     去掉 downloads.open 权限与 gecko 设置；加入 offscreen 权限与 minimum_chrome_version。
+//     去掉 downloads.open（仅 Firefox 有）与未使用的 scripting/activeTab（商店最小权限要求），
+//     去掉 gecko 设置；加入 offscreen 权限与 minimum_chrome_version。
 // 版本号取自根 manifest.json，并据此同步生成根 update.json（自托管更新清单）。
 //
 // 用法：
@@ -88,7 +89,10 @@ const chromeOut = path.join(DIST, `PurrVid-chrome-v${version}`);
 prepareOut(chromeOut);
 const chromeManifest = JSON.parse(JSON.stringify(manifest));
 chromeManifest.background = { service_worker: manifest.background.scripts[0], type: "module" };
-chromeManifest.permissions = manifest.permissions.filter(name => name !== "downloads.open");
+// Chrome/Edge 商店要求最小权限：downloads.open 仅 Firefox 存在；scripting/activeTab
+// 本扩展从未调用（面板经静态内容脚本 + MAIN world 动态 import 注入），声明会被商店拒绝。
+const CHROME_DROP_PERMISSIONS = ["downloads.open", "scripting", "activeTab"];
+chromeManifest.permissions = manifest.permissions.filter(name => !CHROME_DROP_PERMISSIONS.includes(name));
 if (!chromeManifest.permissions.includes("offscreen")) chromeManifest.permissions.push("offscreen");
 delete chromeManifest.browser_specific_settings;
 chromeManifest.minimum_chrome_version = "116";
