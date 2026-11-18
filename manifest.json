@@ -1,6 +1,6 @@
 {
   "name": "PurrVid-星喵助手",
-  "version": "1.0.1",
+  "version": "1.0.3",
   "description": "一只帮你保存网页视频的星空猫娘：在视频页内直接下载你有权保存的 HLS / DASH / 直连媒体。",
   "manifest_version": 3,
   "background": {

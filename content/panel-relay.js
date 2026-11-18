@@ -17,11 +17,12 @@
 //     { type:"hls-result", requestId, buffer, ext, height | error }
 //     { type:"hls-progress", requestId, text } 下载进度文本
 //     { type:"floating-enabled", value }       悬浮按钮是否常驻
+//     { type:"inject-panel" }                  通知 MAIN world bootstrap 按需注入面板
 //     { type:"open-panel" }                    调出（展开）面板
 //
 // runtime 消息（↔ background/service-worker.js）：
 //   get-resources / resources-updated / ffmpeg / hls-download / hls-progress
-//   floating-enabled(→所有标签页) / open-panel(→活动标签页)
+//   floating-enabled(→所有标签页) / open-panel(→活动标签页) / panel-activate(→有资源的标签页)
 //   Firefox：ffmpeg/hls-download 直传二进制（结构化克隆）。
 //   Chrome：经 lib/transport.js 的 base64 分片 Port（runtime 消息仅 JSON 且有大小限制）。
 // ============================================================================
@@ -83,7 +84,10 @@
     if (message?.type === "resources-updated") pushResources();
     if (message?.type === "hls-progress") post("hls-progress", { requestId: message.requestId, text: message.text });
     if (message?.type === "floating-enabled") { floatingEnabled = message.value !== false; postFloating(); }
-    if (message?.type === "open-panel") post("open-panel");
+    // 嗅探到媒体：通知 MAIN world bootstrap 注入面板（悬浮按钮随之出现）。
+    if (message?.type === "panel-activate") post("inject-panel");
+    // popup 调出面板：未注入时先注入，bootstrap 会在就绪后补投 open。
+    if (message?.type === "open-panel") { post("inject-panel"); post("open-panel"); }
   });
 
   // ---- ffmpeg 合并/转封装：转发到后台执行，回传结果（buffer 用转移列表）--------
@@ -146,6 +150,15 @@
     }
   });
 
-  pushResources();
-  loadFloating();
+  // B站 / YouTube 的面板在 document_start 就已注入，其 ready 可能早于本脚本
+  // （document_idle），故加载时主动推一次；其它站点面板按需注入、必晚于本脚本，
+  // 靠 ready 握手即可——避免在无媒体站点产生多余的消息往返。
+  const hostname = location.hostname;
+  const earlyPanelHost = /(^|\.)bilibili\.com$/.test(hostname)
+    || hostname === "youtube.com" || hostname.endsWith(".youtube.com")
+    || hostname === "youtu.be" || hostname.endsWith(".youtube-nocookie.com");
+  if (earlyPanelHost) {
+    pushResources();
+    loadFloating();
+  }
 })();

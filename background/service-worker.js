@@ -20,7 +20,8 @@
 // runtime 消息协议（type 字段）：
 //   嗅探/资源：media-found · youtube-resource · yt-rewrite · scan-result ·
 //             get-resources · set-sniff-enabled · clear-resources · resources-updated(广播)
-//   面板：    set-floating-enabled · floating-enabled(→所有标签页) · open-panel(→活动标签页)
+//   面板：    set-floating-enabled · floating-enabled(→所有标签页) · open-panel(→活动标签页) ·
+//             panel-activate(→记录到资源的标签页，通知按需注入面板)
 //   任务：    start-task · get-tasks · tasks-page-ready · update-task · remove-task ·
 //             tasks-updated(广播)
 //   下载：    ffmpeg · hls-download · hls-progress(→标签页)
@@ -170,12 +171,21 @@ function recordMedia(tabId, rawUrl, extra = {}) {
     updateBadge(tabId);
     persistTab(tabId);
     broadcast({ type: "resources-updated", tabId });
+    notifyPanel(tabId);
   }
   return saved;
 }
 
 function broadcast(message) {
   api.runtime.sendMessage(message).catch(() => {});
+}
+
+// 记录到媒体后通知标签页按需注入面板（内容脚本只收 tabs.sendMessage）。
+// 面板未注入的站点由此出现悬浮按钮；无媒体站点永远不打扰。
+function notifyPanel(tabId) {
+  if (tabId != null && tabId >= 0) {
+    api.tabs.sendMessage(tabId, { type: "panel-activate" }).catch(() => {});
+  }
 }
 
 // ---- 流媒体校验：探测 HLS/DASH 清单，标记 DRM / 直播 / 清晰度数 ----------------
@@ -401,6 +411,7 @@ function recordYoutube(tabId, payload, title, pageUrl) {
   updateBadge(tabId);
   persistTab(tabId);
   broadcast({ type: "resources-updated", tabId });
+  notifyPanel(tabId);
 }
 
 // ---- 合并 DOM 嗅探结果（来自 media-sniffer / 主动扫描） ----------------------
@@ -440,6 +451,7 @@ function mergeDomItems(tabId, items, title, source, frameId) {
     updateBadge(tabId);
     persistTab(tabId);
     broadcast({ type: "resources-updated", tabId });
+    notifyPanel(tabId);
   }
   return added;
 }

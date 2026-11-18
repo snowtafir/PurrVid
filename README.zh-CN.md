@@ -14,7 +14,7 @@
 ![Firefox 140+](https://img.shields.io/badge/Firefox-140%2B-FF7139?logo=firefoxbrowser&logoColor=white)
 ![Chrome 116+](https://img.shields.io/badge/Chrome-116%2B-4285F4?logo=googlechrome&logoColor=white)
 ![ffmpeg.wasm](https://img.shields.io/badge/ffmpeg-wasm-007808?logo=ffmpeg&logoColor=white)
-![Version](https://img.shields.io/badge/version-1.0.1-blue)
+![Version](https://img.shields.io/badge/version-1.0.3-blue)
 ![License: GPL v3](https://img.shields.io/badge/License-GPL%20v3-blue.svg)
 ![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen)
 

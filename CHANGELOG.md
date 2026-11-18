@@ -4,6 +4,24 @@
 
 格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## 1.0.3 - 2026-11-18
+
+### 变更
+
+- 发布流程调整（功能与 1.0.2 相同）：构建按 AMO 双渠道分包——公开（listed）版清单移除 `gecko.update_url` 以通过上传校验；自托管（unlisted）版版本号追加第四段 `.1` 并保留 `update_url`，`node build.mjs --unlisted` 一键生成，update.json 同步指向 GitHub 带 `-R` 尾缀的 Release。
+
+## 1.0.2 - 2026-11-18
+
+### 修复
+
+- **扩展破坏部分站点页面（如 GitHub）的问题**：引擎模块原先在所有站点 `document_start` 注入，模块加载先于页面自身 import map 解析，按规范使 import map 失效、页面模块（Releases 标签等 React 组件）加载失败。现通用站点 `document_start` 零模块加载，面板改为嗅探到媒体或用户调出时按需注入。
+- **悬浮按钮在所有网站显示的问题**：面板与悬浮按钮现在只出现在 B 站、YouTube、嗅探到媒体资源的页面，以及从 popup 主动调出面板的页面。
+- 无媒体站点内容脚本与后台的多余消息往返（onMessage 异步响应报错的来源之一）：relay 不再在非视频站点加载时主动拉取资源。
+
+### 变更
+
+- 注入时机分层：B 站立即、YouTube 立即、其它站点按需；新增 `panel-activate` / `inject-panel` 消息契约（后台记录到媒体 → relay → MAIN world bootstrap 注入面板）。
+
 ## 1.0.1 - 2026-11-18
 
 ### 新增
