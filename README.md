@@ -52,11 +52,11 @@ Visit [PurrVid – Firefox Add-on](https://addons.mozilla.org/zh-CN/firefox/addo
 
 Go to the [Releases page](https://github.com/snowtafir/PurrVid/releases), download the Firefox build (`.xpi`), and open it in Firefox to install.
 
-### Chrome
+### Chrome/Edge
 
 Go to the [Releases page](https://github.com/snowtafir/PurrVid/releases), download the Chrome build (`.zip`), and unzip it. Then:
 
-1. Open `chrome://extensions` and enable **Developer mode** (top-right).
+1. Open `chrome://extensions`/`edge://extensions` and enable **Developer mode** (top-right/left-bottom).
 2. Click **Load unpacked** and select the extracted `PurrVid-chrome-v{version}/` folder.
 
 ### Load from source (developers)

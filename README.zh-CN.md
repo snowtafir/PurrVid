@@ -52,11 +52,11 @@
 
 前往 [Release 页面](https://github.com/snowtafir/PurrVid/releases)，下载 Firefox 版本（`.xpi`），在 Firefox 中打开即可安装。
 
-### Chrome
+### Chrome/Edge
 
 前往 [Release 页面](https://github.com/snowtafir/PurrVid/releases)，下载 Chrome 版本（`.zip`）并解压，然后：
 
-1. 打开 `chrome://extensions`，右上角开启 **开发者模式**。
+1. 打开 `chrome://extensions`/ `edge://extensions`，右上角、左下角开启 **开发者模式**。
 2. 点击 **加载已解压的扩展程序**，选择解压出的 `PurrVid-chrome-v{version}/` 目录。
 
 ### 从源码加载（开发者）
