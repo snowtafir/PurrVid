@@ -24,7 +24,9 @@
 //             panel-activate(→记录到资源的标签页，通知按需注入面板)
 //   任务：    start-task · get-tasks · tasks-page-ready · update-task · remove-task ·
 //             tasks-updated(广播)
-//   下载：    ffmpeg · hls-download · hls-progress(→标签页)
+//   下载：    ffmpeg · hls-download · hls-progress(→标签页) ·
+//             direct-download(通用直连) · direct-progress(→标签页) · hls-probe(清单探测) ·
+//             cancel-download(中断指定 requestId 的后台下载)
 //
 // 存储：local.sniffEnabled / local.floatingEnabled（开关）；session.res:<tabId> / session.tasks（断点恢复）。
 // ============================================================================
@@ -33,12 +35,17 @@ import {
   classifyMediaUrl,
   normalizeMediaUrl,
   hostOf,
-  formatDuration
+  formatDuration,
+  formatSize,
+  downloadBuffer,
+  fetchWithRetry
 } from "../lib/media-utils.js";
 import { isYoutubePage, buildYoutubeResource } from "../lib/youtube.js";
 import { runFfmpeg } from "../lib/ffmpeg-host.js";
 import { attachHeavyServer } from "../lib/transport.js";
 import { fetchHlsMedia, downloadHlsTrack } from "../lib/hls.js";
+import { isMasterPlaylist } from "../lib/m3u8.js";
+import { acquireHeaderRules } from "../lib/request-headers.js";
 
 const api = typeof browser !== "undefined" ? browser : chrome;
 
@@ -610,13 +617,29 @@ async function handleMessage(message, sender) {
     const result = await downloadHlsInBackground(message, sender.tab?.id);
     return { ok: true, ...result };
   }
+  // 通用直连：跨域资源经后台下载（host_permissions 豁免 CORS / 页面 CSP）。
+  if (type === "direct-download") {
+    const result = await downloadDirectInBackground(message, sender.tab?.id);
+    return { ok: true, ...result };
+  }
+  // 通用 HLS 清单探测：跨域主清单在页内会被 CORS 拦截，改由后台取回原文。
+  if (type === "hls-probe") {
+    const result = await probeHlsInBackground(message);
+    return { ok: true, ...result };
+  }
+  // 面板取消下载：中断对应后台任务的网络阶段（ffmpeg 阶段结果由面板丢弃）。
+  if (type === "cancel-download") {
+    downloadControllers.get(message.requestId)?.abort();
+    return { ok: true };
+  }
   return undefined;
 }
 
 // ---- 大块二进制请求（Chrome relay 经 base64 分片 Port;Firefox 走上面的消息） --
 attachHeavyServer(api, {
   ffmpeg: async (meta, binaries) => ({ buffer: await runFfmpeg(api, meta.op, { ...meta, ...binaries }) }),
-  hls: (meta, binaries, port) => downloadHlsInBackground(meta, port.sender.tab?.id)
+  hls: (meta, binaries, port) => downloadHlsInBackground(meta, port.sender.tab?.id),
+  direct: (meta, binaries, port) => downloadDirectInBackground(meta, port.sender.tab?.id)
 });
 
 // ---- DNR 会话规则：为 googlevideo 请求补上 YouTube 的 Origin/Referer ----------
@@ -645,30 +668,86 @@ async function setupGoogleVideoRules() {
 }
 
 // ---- 后台 HLS 下载：取清单 → 下载视频/音频分段 → 合并/转封装 ------------------
+// pageUrl 仅通用 HLS 传入：按任务补 Referer/Origin（YouTube 已有固定规则 1001）。
+// requestId 登记 AbortController，供面板 cancel-download 中断网络阶段。
+const downloadControllers = new Map();
+
 async function downloadHlsInBackground(message, tabId) {
-  const { requestId, mediaUrl, audioUrl, height } = message;
+  const { requestId, mediaUrl, audioUrl, height, pageUrl, estimatedBytes } = message;
   const progress = text => {
     if (tabId != null) api.tabs.sendMessage(tabId, { type: "hls-progress", requestId, text }).catch(() => {});
   };
-  const media = await fetchHlsMedia(mediaUrl);
-  if (media.drm) throw new Error("该 HLS 流受 DRM 保护，无法下载。");
-  const videoTrack = await downloadHlsTrack(media, "视频分段", progress);
-  let audioTrack = null;
-  if (audioUrl) {
-    const audioMedia = await fetchHlsMedia(audioUrl);
-    if (audioMedia.drm) throw new Error("音频流受 DRM 保护，无法下载。");
-    audioTrack = await downloadHlsTrack(audioMedia, "音频分段", progress);
+  const controller = new AbortController();
+  if (requestId != null) downloadControllers.set(requestId, controller);
+  const signal = controller.signal;
+  const release = pageUrl ? await acquireHeaderRules(pageUrl, [mediaUrl, audioUrl]) : () => {};
+  try {
+    const media = await fetchHlsMedia(mediaUrl, signal);
+    media.estimatedBytes = estimatedBytes || 0;
+    if (media.drm) throw new Error("该 HLS 流受 DRM 保护，无法下载。");
+    if (!media.endList && pageUrl) throw new Error("这是直播流（无 ENDLIST），不支持完整下载。");
+    const videoTrack = await downloadHlsTrack(media, "视频分段", progress, signal);
+    let audioTrack = null;
+    if (audioUrl) {
+      const audioMedia = await fetchHlsMedia(audioUrl, signal);
+      if (audioMedia.drm) throw new Error("音频流受 DRM 保护，无法下载。");
+      audioTrack = await downloadHlsTrack(audioMedia, "音频分段", progress, signal);
+    }
+    progress("正在合并…");
+    if (audioTrack) {
+      const buffer = await runFfmpeg(api, "merge", { videoBytes: videoTrack.buffer, audioBytes: audioTrack.buffer, outputName: "merged.mp4", videoExt: "mp4", audioExt: "m4a" });
+      return { buffer, ext: "mp4", height };
+    }
+    if (videoTrack.container === "ts") {
+      const buffer = await runFfmpeg(api, "remux", { inputBytes: videoTrack.buffer, inputName: "input.ts", outputName: "output.mp4", extraArgs: ["-movflags", "+faststart"] });
+      return { buffer, ext: "mp4", height };
+    }
+    return { buffer: videoTrack.buffer, ext: "mp4", height };
+  } finally {
+    release();
+    if (requestId != null) downloadControllers.delete(requestId);
   }
-  progress("正在合并…");
-  if (audioTrack) {
-    const buffer = await runFfmpeg(api, "merge", { videoBytes: videoTrack.buffer, audioBytes: audioTrack.buffer, outputName: "merged.mp4", videoExt: "mp4", audioExt: "m4a" });
-    return { buffer, ext: "mp4", height };
+}
+
+// ---- 后台通用直连下载：豁免页面 CORS / CSP，任务级 DNR 补 Referer -------------
+async function downloadDirectInBackground(message, tabId) {
+  const { requestId, url, ext, pageUrl } = message;
+  const progress = text => {
+    if (tabId != null) api.tabs.sendMessage(tabId, { type: "direct-progress", requestId, text }).catch(() => {});
+  };
+  const controller = new AbortController();
+  if (requestId != null) downloadControllers.set(requestId, controller);
+  const release = await acquireHeaderRules(pageUrl, [url]);
+  try {
+    const buffer = await downloadBuffer(url, {
+      retries: 3,
+      timeout: 300000,
+      signal: controller.signal,
+      onProgress: ({ received }) => progress(`正在下载… ${formatSize(received)}`)
+    });
+    return { buffer, ext: ext || "mp4" };
+  } finally {
+    release();
+    if (requestId != null) downloadControllers.delete(requestId);
   }
-  if (videoTrack.container === "ts") {
-    const buffer = await runFfmpeg(api, "remux", { inputBytes: videoTrack.buffer, inputName: "input.ts", outputName: "output.mp4", extraArgs: ["-movflags", "+faststart"] });
-    return { buffer, ext: "mp4", height };
+}
+
+// ---- 后台 HLS 清单探测：取回清单原文（跨域无 CORS 时页内取不到） --------------
+// 只取文本不做解析：清晰度/音轨渲染逻辑留在面板，避免两处维护。
+async function probeHlsInBackground(message) {
+  const { url, pageUrl } = message;
+  const release = await acquireHeaderRules(pageUrl, [url]);
+  try {
+    const response = await fetchWithRetry(url, { retries: 3, timeout: 30000 });
+    const text = await response.text();
+    // DRM 在探测阶段即拒绝（与嗅探校验同一判据），面板不再回退页内重试。
+    if (/#EXT-X-KEY:[^\n]*METHOD=SAMPLE-AES/i.test(text) || /#EXT-X-SESSION-KEY:[^\n]*KEYFORMAT="(urn:uuid:edef8ba9|com\.widevine|com\.microsoft|com\.apple)/i.test(text)) {
+      throw new Error("该 HLS 流受 DRM 保护，无法下载。");
+    }
+    return { text, master: isMasterPlaylist(text) };
+  } finally {
+    release();
   }
-  return { buffer: videoTrack.buffer, ext: "mp4", height };
 }
 
 // ---- 启动 --------------------------------------------------------------------

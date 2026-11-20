@@ -17,6 +17,14 @@
 //
 // 安全：面板用 DOM API 构建（不用 innerHTML），图标用 data URL，兼容 YouTube 的
 //   严格 Trusted Types CSP。ffmpeg 与 HLS 分片下载委托后台执行（见 panel-relay）。
+//
+// 下载路由（防 Referer/Cookie 回归的三层设计）：
+//   1. 同源资源留页内（天然 Referer/Cookie，行为与旧版一致）；跨域直连/HLS 走
+//      后台（host_permissions 豁免 CORS / 页面 CSP，能力增强）；DASH 仍全程页内。
+//   2. 后台按任务注册 DNR 规则补真实页面 Referer/Origin（见 lib/request-headers.js）。
+//   3. 后台失败自动回退页内原路径 → 旧版能下的这里仍能下（DRM/直播拒绝除外）。
+//   下载按钮点击后原地切换「取消下载」（复用元素）：页内 AbortSignal + 后台
+//   cancel-download 双路中断；取消为终态，不触发回退；合并阶段取消丢弃结果。
 // ============================================================================
 
 import {
@@ -72,6 +80,7 @@ const CSS = `
 .field select { flex: 1; min-width: 0; max-width: 320px; padding: 5px 8px; border: 1px solid #e4e9f2; border-radius: 8px; background: #f7f8fc; color: #465777; font: inherit; font-size: 12px; }
 .primary-button { min-height: 32px; padding: 0 14px; border: 0; border-radius: 9px; background: linear-gradient(135deg, #f45a8d, #d83f80); color: #fff; font: inherit; font-size: 12px; font-weight: 600; cursor: pointer; }
 .primary-button:disabled { opacity: .55; cursor: wait; }
+#download-list button.cancel, .primary-button.cancel { background: linear-gradient(135deg, #97a1b5, #6f7a92); }
 #download-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 8px; padding: 0; margin: 0 0 8px; list-style: none; }
 #download-list > li { min-width: 0; padding: 10px; border: 1px solid #e5eaf3; border-radius: 16px; background: rgba(255,255,255,.78); box-shadow: 0 8px 24px rgba(56,73,110,.06); }
 #download-list strong { display: block; font-size: 12px; line-height: 1.45; word-break: break-word; white-space: normal; }
@@ -84,6 +93,20 @@ const CSS = `
 `;
 
 
+// 把样式注入 shadow root：优先 constructable stylesheet（不受页面 style-src
+// 'unsafe-inline' 限制，Trusted Types 安全），不支持时回退 <style>。
+function applyStyles(shadow, cssText) {
+  if (typeof CSSStyleSheet !== "undefined" && "adoptedStyleSheets" in shadow) {
+    const sheet = new CSSStyleSheet();
+    sheet.replaceSync(cssText);
+    shadow.adoptedStyleSheets = [sheet];
+  } else {
+    const style = document.createElement("style");
+    style.textContent = cssText;
+    shadow.appendChild(style);
+  }
+}
+
 // ---- 模块状态 ----------------------------------------------------------------
 let panelRoot = null;        // Shadow root
 let hostEl = null;           // 面板宿主元素
@@ -94,6 +117,71 @@ let renderedHlsKey = "";     // 已渲染的 HLS 清单键，避免重复解析
 let lastGenericResources = [];
 let isBusy = false;          // 是否有下载正在进行
 let floatingEnabled = true;  // 悬浮按钮是否常驻（由 popup 经 relay 下发）
+let activeRun = null;        // 进行中的下载（按钮原地切换「取消下载」）
+
+// ---- 下载运行态：开始/结束/取消 ----------------------------------------------
+// 按钮点击后原地变为「取消下载」（复用元素）；取消为终态：页内 AbortController
+// 中断 + 后台 cancel-download 中断 + 立即 settle 桥接 Promise，迟到结果丢弃。
+function beginRun(button) {
+  isBusy = true;
+  const run = { canceled: false, controller: new AbortController(), bgRequests: new Set() };
+  activeRun = run;
+  button.dataset.busy = "1";
+  button.dataset.label = button.textContent;
+  button.textContent = "取消下载";
+  button.title = "取消当前下载";
+  button.classList.add("cancel");
+  return run;
+}
+
+function endRun(button, run) {
+  if (activeRun === run) activeRun = null;
+  isBusy = false;
+  button.dataset.busy = "";
+  button.textContent = button.dataset.label || "下载";
+  button.title = "";
+  button.classList.remove("cancel");
+}
+
+function cancelRun(run) {
+  if (run.canceled) return;
+  run.canceled = true;
+  run.controller.abort();
+  for (const requestId of run.bgRequests) {
+    window.postMessage({ source: RELAY_SOURCE, from: "panel", type: "cancel-download", requestId }, "*");
+    for (const pendingMap of [hlsPending, directPending]) {
+      const pending = pendingMap.get(requestId);
+      if (pending) {
+        clearTimeout(pending.timer);
+        pendingMap.delete(requestId);
+        pending.reject(new DOMException("已取消", "AbortError"));
+      }
+    }
+  }
+  setStatus("已取消。");
+  log("下载已取消。");
+}
+
+function checkCanceled(run) {
+  if (run?.canceled) throw new DOMException("已取消", "AbortError");
+}
+
+// 可取消按钮的统一点击接线：busy 时点击=取消，否则启动下载并原地切换按钮。
+function wireCancelButton(button, execute) {
+  button.addEventListener("click", () => {
+    if (button.dataset.busy === "1") {
+      if (activeRun) cancelRun(activeRun);
+      return;
+    }
+    if (isBusy) return;
+    const run = beginRun(button);
+    Promise.resolve(execute(run)).catch(error => {
+      if (run.canceled) return;
+      log("下载失败：", error?.message || error);
+      setStatus("下载失败：" + (error?.message || error));
+    }).finally(() => endRun(button, run));
+  });
+}
 
 // ---- 基础 UI 工具 ------------------------------------------------------------
 function log(...parts) {
@@ -125,8 +213,9 @@ function outputName(title, ext, height) {
   return `${base}${height ? `_${height}p` : ""}.${ext}`;
 }
 
-// 通用资源卡片（标题 + 大小 + 下载按钮）。
-function makeCard(label, sizeText, onClick) {
+// 通用资源卡片（标题 + 大小 + 下载按钮）。cancelable 时按钮原地切换「取消下载」；
+// 解析类操作（选择清晰度）保持旧的禁用逻辑。
+function makeCard(label, sizeText, onClick, cancelable = false) {
   const li = document.createElement("li");
   const strong = document.createElement("strong");
   strong.textContent = label;
@@ -137,20 +226,24 @@ function makeCard(label, sizeText, onClick) {
   const button = document.createElement("button");
   button.type = "button";
   button.textContent = "下载";
-  button.addEventListener("click", async () => {
-    if (isBusy) return;
-    isBusy = true;
-    button.disabled = true;
-    try {
-      await onClick();
-    } catch (error) {
-      log("下载失败：", error?.message || error);
-      setStatus("下载失败：" + (error?.message || error));
-    } finally {
-      isBusy = false;
-      button.disabled = false;
-    }
-  });
+  if (cancelable) {
+    wireCancelButton(button, onClick);
+  } else {
+    button.addEventListener("click", async () => {
+      if (isBusy) return;
+      isBusy = true;
+      button.disabled = true;
+      try {
+        await onClick();
+      } catch (error) {
+        log("下载失败：", error?.message || error);
+        setStatus("下载失败：" + (error?.message || error));
+      } finally {
+        isBusy = false;
+        button.disabled = false;
+      }
+    });
+  }
   li.append(strong, size, button);
   return li;
 }
@@ -240,9 +333,7 @@ function ensurePanel() {
     document.body.appendChild(hostEl);
   }
   panelRoot = hostEl.shadowRoot || hostEl.attachShadow({ mode: "open" });
-
-  const style = document.createElement("style");
-  style.textContent = CSS + LOG_CSS;
+  applyStyles(panelRoot, CSS + LOG_CSS);
 
   const content = document.createElement("div");
   content.id = "content";
@@ -298,7 +389,7 @@ function ensurePanel() {
   fabLabel.className = "fab-label";
   fabLabel.textContent = "打开星喵助手";
   fab.append(fabIcon, fabLabel);
-  panelRoot.append(style, content, fab);
+  panelRoot.append(content, fab);
 
   ui = { content, toggle, fab, badge, title, controls, downloadList, status, logs, logConsole: createLogConsole(logs, { title: "解析日志" }) };
   ui.toggle.addEventListener("click", () => setOpen(false, true));
@@ -326,31 +417,46 @@ function showEmpty(text) {
   ui.downloadList.appendChild(li);
 }
 
-async function fetchText(url) {
-  const response = await fetchWithRetry(url, { retries: 3, timeout: 30000 });
+async function fetchText(url, signal) {
+  const response = await fetchWithRetry(url, { retries: 3, timeout: 30000, signal });
   return response.text();
 }
 
 // ---- YouTube 直链下载（googlevideo 分块） ------------------------------------
-async function downloadGoogleVideo(format, onProgress) {
+async function downloadGoogleVideo(format, onProgress, signal) {
   const baseUrl = cleanGoogleVideoUrl(format.finalUrl || format.url);
   const total = format.contentLength || googleVideoTotal(baseUrl);
   if (!total || total <= CHUNK_SIZE) {
-    return downloadBuffer(baseUrl, { retries: 3, timeout: 300000, onProgress });
+    return downloadBuffer(baseUrl, { retries: 3, timeout: 300000, onProgress, signal });
   }
   const chunks = [];
   for (let start = 0; start < total; start += CHUNK_SIZE) {
     chunks.push({ start, end: Math.min(start + CHUNK_SIZE, total) - 1 });
   }
   const buffers = new Array(chunks.length);
+  // 并发分块各自从 0 计 received，直接上报会互相覆盖导致进度回跳：
+  // 汇总已完成块 + 各在途块实时字节，200ms 节流。
+  const partial = new Array(chunks.length).fill(0);
+  let completed = 0;
+  let lastReport = 0;
+  const report = force => {
+    const now = Date.now();
+    if (!force && now - lastReport < 200) return;
+    lastReport = now;
+    onProgress?.({ received: completed + partial.reduce((sum, value) => sum + value, 0), total });
+  };
   await mapLimit(chunks, CONCURRENCY, async (chunk, index) => {
     buffers[index] = await downloadBuffer(baseUrl, {
       retries: 3,
       timeout: 300000,
       headers: { Range: `bytes=${chunk.start}-${chunk.end}` },
-      onProgress
+      onProgress: ({ received }) => { partial[index] = received; report(false); },
+      signal
     });
-  });
+    partial[index] = 0;
+    completed += buffers[index].byteLength;
+    report(true);
+  }, signal);
   return concatBuffers(buffers);
 }
 
@@ -416,11 +522,59 @@ function requestHlsBackground(payload) {
     const requestId = ++hlsSeq;
     const timer = setTimeout(() => {
       hlsPending.delete(requestId);
+      // 超时也要中断后台任务，否则面板回退页内时会与后台重复下载。
+      window.postMessage({ source: RELAY_SOURCE, from: "panel", type: "cancel-download", requestId }, "*");
       reject(new Error("HLS 下载超时"));
     }, 1800000);
     hlsPending.set(requestId, { resolve, reject, timer });
+    activeRun?.bgRequests.add(requestId);
     window.postMessage({ source: RELAY_SOURCE, from: "panel", type: "hls-download", requestId, ...payload }, "*");
   });
+}
+
+// ---- 与后台的 直连下载 / HLS 清单探测 桥接（跨域资源专用，经 panel-relay） ----
+let directSeq = 0;
+const directPending = new Map();
+function requestDirectBackground(payload) {
+  return new Promise((resolve, reject) => {
+    const requestId = ++directSeq;
+    const timer = setTimeout(() => {
+      directPending.delete(requestId);
+      window.postMessage({ source: RELAY_SOURCE, from: "panel", type: "cancel-download", requestId }, "*");
+      reject(new Error("直连下载超时"));
+    }, 1800000);
+    directPending.set(requestId, { resolve, reject, timer });
+    activeRun?.bgRequests.add(requestId);
+    window.postMessage({ source: RELAY_SOURCE, from: "panel", type: "direct-download", requestId, ...payload }, "*");
+  });
+}
+
+let probeSeq = 0;
+const probePending = new Map();
+function requestHlsProbe(url) {
+  return new Promise((resolve, reject) => {
+    const requestId = ++probeSeq;
+    const timer = setTimeout(() => {
+      probePending.delete(requestId);
+      reject(new Error("清单探测超时"));
+    }, 120000);
+    probePending.set(requestId, { resolve, reject, timer });
+    window.postMessage({ source: RELAY_SOURCE, from: "panel", type: "hls-probe", requestId, url }, "*");
+  });
+}
+
+// ---- 下载路由工具：同源留页内、跨域走后台、失败回退页内 ----------------------
+function isCrossOrigin(url) {
+  try {
+    return new URL(url, location.href).origin !== location.origin;
+  } catch {
+    return false;
+  }
+}
+
+// DRM / 直播是明确拒绝而非网络故障：回退页内也会得到同样结论，不做无谓重试。
+function isPolicyError(error) {
+  return /DRM|直播/.test(String(error?.message || error));
 }
 
 // ---- YouTube 渲染与下载 ------------------------------------------------------
@@ -432,7 +586,7 @@ function renderYoutube(resource) {
     const key = `${resource.videoId}|${resource.hlsManifestUrl}`;
     if (key === renderedHlsKey) return;
     renderedHlsKey = key;
-    openHls({ kind: "hls", url: resource.hlsManifestUrl, title: resource.title, youtube: true }).catch(error => {
+    openHls({ kind: "hls", url: resource.hlsManifestUrl, title: resource.title, youtube: true, duration: resource.duration }).catch(error => {
       renderedHlsKey = "";
       ensurePanel();
       log("HLS 解析失败：", error?.message || error);
@@ -477,43 +631,33 @@ function renderYoutube(resource) {
   videoSelect.addEventListener("change", syncAudio);
   syncAudio();
 
-  button.addEventListener("click", async () => {
-    if (isBusy) return;
+  wireCancelButton(button, run => {
     const videoFormat = videoOptions[Number(videoSelect.value)]?.format || null;
     const audioFormat = audioSelect.disabled ? null : (audioOptions[Number(audioSelect.value)]?.format || null);
     if (!videoFormat && !audioFormat) { setStatus("未选择任何格式"); return; }
-    isBusy = true;
-    button.disabled = true;
-    try {
-      await runYoutubeDownload(videoFormat, audioFormat);
-    } catch (error) {
-      log("下载失败：", error?.message || error);
-      setStatus("下载失败：" + (error?.message || error));
-    } finally {
-      isBusy = false;
-      button.disabled = false;
-    }
+    return runYoutubeDownload(videoFormat, audioFormat, run);
   });
 
   ui.controls.append(makeField("画质", videoSelect), makeField("音轨", audioSelect), button);
-  setOpen(true);
   ui.logConsole.section("YouTube", "youtube");
   ui.logConsole.id({ 画质: videos.length, 音轨: audio.length });
   if (resource?.url) ui.logConsole.link("HLS 清单", resource.url);
   log("下载在本页进行，自动合并音视频。");
 }
 
-async function runYoutubeDownload(videoFormat, audioFormat) {
+async function runYoutubeDownload(videoFormat, audioFormat, run) {
   const targets = [videoFormat, audioFormat].filter(Boolean);
   const rawUrls = targets.map(format => format.url);
   setStatus("正在刷新下载地址…");
   const freshUrls = await requestRewrite(rawUrls);
   targets.forEach((format, index) => { format.finalUrl = freshUrls[index] || rawUrls[index]; });
 
+  const signal = run.controller.signal;
   let received = 0;
   const onProgress = ({ received: r }) => { received = r; setStatus(`正在下载… ${formatSize(received)}`); };
-  const videoBuffer = videoFormat ? await downloadGoogleVideo(videoFormat, onProgress) : null;
-  const audioBuffer = audioFormat ? await downloadGoogleVideo(audioFormat, onProgress) : null;
+  const videoBuffer = videoFormat ? await downloadGoogleVideo(videoFormat, onProgress, signal) : null;
+  const audioBuffer = audioFormat ? await downloadGoogleVideo(audioFormat, onProgress, signal) : null;
+  checkCanceled(run);
   const height = videoFormat?.height || 0;
   const title = youtubeResource?.title || "youtube";
 
@@ -521,6 +665,7 @@ async function runYoutubeDownload(videoFormat, audioFormat) {
     setStatus("正在合并音视频…");
     const container = youtubeMergeContainer(videoFormat.ext, audioFormat.ext);
     const merged = await mergeWithFFmpeg(videoBuffer, audioBuffer, `merged.${container}`, videoFormat.ext, audioFormat.ext);
+    checkCanceled(run);
     saveBlob(merged, youtubeMime(container), outputName(title, container, height));
   } else if (videoBuffer) {
     saveBlob(videoBuffer, youtubeMime(videoFormat.ext), outputName(title, videoFormat.ext, height));
@@ -532,30 +677,47 @@ async function runYoutubeDownload(videoFormat, audioFormat) {
 }
 
 // ---- HLS / DASH 分段下载（页内通用路径；YouTube 走后台） ---------------------
-async function downloadHlsTrack(media, label) {
+async function downloadHlsTrack(media, label, signal) {
   const segments = media.segments;
   if (!segments.length) throw new Error("清单中没有媒体分段");
   const keyCache = new Map();
   const buffers = new Array(segments.length);
+  const estimate = media.estimatedBytes ? ` / 约 ${formatSize(media.estimatedBytes)}` : "";
   let done = 0;
+  let bytes = 0;
+  // 字节级进度：已完成段累计 + 各在途段实时 received，200ms 节流刷新状态栏。
+  const partial = new Array(segments.length).fill(0);
+  let lastReport = 0;
+  const report = force => {
+    const now = Date.now();
+    if (!force && now - lastReport < 200) return;
+    lastReport = now;
+    const total = bytes + partial.reduce((sum, value) => sum + value, 0);
+    setStatus(`${label} ${done}/${segments.length} · ${formatSize(total)}${estimate}`);
+  };
   await mapLimit(segments, CONCURRENCY, async (segment, index) => {
     const headers = segment.byteRange
       ? { Range: `bytes=${segment.byteRange.offset}-${segment.byteRange.offset + segment.byteRange.length - 1}` }
       : undefined;
-    let buffer = await downloadBuffer(segment.url, { headers, retries: 3 });
+    let buffer = await downloadBuffer(segment.url, {
+      headers, retries: 3, signal,
+      onProgress: ({ received }) => { partial[index] = received; report(false); }
+    });
     // AES-128 自动解密（密钥按 URI 缓存）。
     if (segment.key?.method === "AES-128" && segment.key.uri) {
       if (!keyCache.has(segment.key.uri)) {
-        const response = await fetchWithRetry(segment.key.uri, { retries: 3, timeout: 30000 });
-        const bytes = new Uint8Array(await response.arrayBuffer());
-        keyCache.set(segment.key.uri, await crypto.subtle.importKey("raw", bytes, { name: "AES-CBC" }, false, ["decrypt"]));
+        const response = await fetchWithRetry(segment.key.uri, { retries: 3, timeout: 30000, signal });
+        const keyBytes = new Uint8Array(await response.arrayBuffer());
+        keyCache.set(segment.key.uri, await crypto.subtle.importKey("raw", keyBytes, { name: "AES-CBC" }, false, ["decrypt"]));
       }
       buffer = await crypto.subtle.decrypt({ name: "AES-CBC", iv: segment.key.iv }, keyCache.get(segment.key.uri), buffer);
     }
     buffers[index] = buffer;
+    partial[index] = 0;
+    bytes += buffer.byteLength;
     done++;
-    setStatus(`${label} ${done}/${segments.length}`);
-  });
+    report(true);
+  }, signal);
   // 按顺序拼接，必要时插入 EXT-X-MAP 初始化段。
   const parts = [];
   const mapCache = new Map();
@@ -568,7 +730,7 @@ async function downloadHlsTrack(media, label) {
         const headers = segment.map.byteRange
           ? { Range: `bytes=${segment.map.byteRange.offset}-${segment.map.byteRange.offset + segment.map.byteRange.length - 1}` }
           : undefined;
-        mapCache.set(cacheKey, await downloadBuffer(segment.map.url, { headers, retries: 3 }));
+        mapCache.set(cacheKey, await downloadBuffer(segment.map.url, { headers, retries: 3, signal }));
       }
       parts.push(mapCache.get(cacheKey));
       lastMapUrl = segment.map.url;
@@ -583,11 +745,11 @@ function dashExtOf(mimeType, isAudio) {
   return isAudio ? "m4a" : "mp4";
 }
 
-async function downloadDashTrack(representation, label) {
+async function downloadDashTrack(representation, label, signal) {
   const isAudio = representation.mimeType.startsWith("audio/");
   const ext = dashExtOf(representation.mimeType, isAudio);
   if (!representation.segments || !representation.segments.length) {
-    const buffer = await downloadBuffer(representation.baseUrl, { retries: 3 });
+    const buffer = await downloadBuffer(representation.baseUrl, { retries: 3, signal });
     return { buffer, ext, mime: representation.mimeType };
   }
   const segments = representation.segments;
@@ -597,57 +759,76 @@ async function downloadDashTrack(representation, label) {
     const headers = segment.range
       ? { Range: `bytes=${segment.range.offset}-${segment.range.offset + segment.range.length - 1}` }
       : undefined;
-    buffers[index] = await downloadBuffer(segment.url, { headers, retries: 3 });
+    buffers[index] = await downloadBuffer(segment.url, { headers, retries: 3, signal });
     done++;
     setStatus(`${label} ${done}/${segments.length}`);
-  });
+  }, signal);
   const parts = [];
   if (representation.init) {
     const headers = representation.init.range
       ? { Range: `bytes=${representation.init.range.offset}-${representation.init.range.offset + representation.init.range.length - 1}` }
       : undefined;
-    parts.push(await downloadBuffer(representation.init.url, { headers, retries: 3 }));
+    parts.push(await downloadBuffer(representation.init.url, { headers, retries: 3, signal }));
   }
   parts.push(...buffers);
   return { buffer: concatBuffers(parts), ext, mime: representation.mimeType };
 }
 
 // ---- 下载执行器 --------------------------------------------------------------
-async function runHlsDownload(resource, variant, audioRendition) {
+// 后台 HLS 下载入口（YouTube 与跨域通用资源共用），成功后保存并记录日志。
+async function runHlsViaBackground(resource, mediaUrl, audioRendition, height, run, estimatedBytes) {
+  setStatus("正在后台下载分片…");
+  const result = await requestHlsBackground({
+    mediaUrl,
+    audioUrl: audioRendition?.url || "",
+    title: resource.title || "video",
+    height,
+    // pageUrl 仅通用资源传入：后台据此按任务补 Referer/Origin 并拒绝直播。
+    pageUrl: resource.youtube ? "" : location.href,
+    estimatedBytes: estimatedBytes || 0
+  });
+  checkCanceled(run);
+  saveBlob(result.buffer, "video/mp4", outputName(resource.title || "video", result.ext || "mp4", result.height));
+  setStatus("已完成，已触发浏览器保存。");
+  log("HLS 下载完成。");
+}
+
+async function runHlsDownload(resource, variant, audioRendition, run) {
   const mediaUrl = variant ? variant.url : resource.url;
-  // YouTube：分片下载与合并都委托后台（豁免 CORS / CSP）。
-  if (resource.youtube) {
-    setStatus("正在后台下载分片…");
-    const result = await requestHlsBackground({
-      mediaUrl,
-      audioUrl: audioRendition?.url || "",
-      title: resource.title || "video",
-      height: variant?.height || resource.height || 0
-    });
-    saveBlob(result.buffer, "video/mp4", outputName(resource.title || "video", result.ext || "mp4", result.height));
-    setStatus("已完成，已触发浏览器保存。");
-    log("HLS 下载完成。");
-    return;
+  const height = variant?.height || resource.height || 0;
+  const signal = run.controller.signal;
+  // YouTube 与跨域通用 HLS：分片下载与合并都委托后台（豁免 CORS / CSP）。
+  if (resource.youtube || isCrossOrigin(mediaUrl)) {
+    try {
+      await runHlsViaBackground(resource, mediaUrl, audioRendition, height, run, variant?.estimatedBytes);
+      return;
+    } catch (error) {
+      if (resource.youtube || run.canceled || isPolicyError(error)) throw error;
+      log("后台下载失败，回退页内重试：", error?.message || error);
+    }
   }
-  const media = parseMedia(await fetchText(mediaUrl), mediaUrl);
+  const media = parseMedia(await fetchText(mediaUrl, signal), mediaUrl);
+  media.estimatedBytes = variant?.estimatedBytes || 0;
   if (media.drm) throw new Error("该 HLS 流受 DRM 保护，无法下载。");
   if (!media.endList && !resource.youtube) throw new Error("这是直播流（无 ENDLIST），不支持完整下载。");
-  const height = variant?.height || resource.height || 0;
-  const videoTrack = await downloadHlsTrack(media, "视频分段");
+  const videoTrack = await downloadHlsTrack(media, "视频分段", signal);
   let audioTrack = null;
   if (audioRendition) {
-    const audioMedia = parseMedia(await fetchText(audioRendition.url), audioRendition.url);
+    const audioMedia = parseMedia(await fetchText(audioRendition.url, signal), audioRendition.url);
     if (audioMedia.drm) throw new Error("音频流受 DRM 保护，无法下载。");
-    audioTrack = await downloadHlsTrack(audioMedia, "音频分段");
+    audioTrack = await downloadHlsTrack(audioMedia, "音频分段", signal);
   }
+  checkCanceled(run);
   const title = resource.title || "video";
   if (audioTrack) {
     setStatus("正在合并音视频…");
     const merged = await mergeWithFFmpeg(videoTrack.buffer, audioTrack.buffer, "merged.mp4", "mp4", "m4a");
+    checkCanceled(run);
     saveBlob(merged, "video/mp4", outputName(title, "mp4", height));
   } else if (videoTrack.container === "ts") {
     setStatus("正在转封装…");
     const remuxed = await remuxWithFFmpeg(videoTrack.buffer, "input.ts", "output.mp4", ["-movflags", "+faststart"]);
+    checkCanceled(run);
     saveBlob(remuxed, "video/mp4", outputName(title, "mp4", height));
   } else {
     saveBlob(videoTrack.buffer, "video/mp4", outputName(title, "mp4", height));
@@ -656,14 +837,17 @@ async function runHlsDownload(resource, variant, audioRendition) {
   log("HLS 下载完成。");
 }
 
-async function runDashDownload(resource, videoRep, audioRep) {
-  const videoTrack = videoRep ? await downloadDashTrack(videoRep, "视频流") : null;
-  const audioTrack = audioRep ? await downloadDashTrack(audioRep, "音频流") : null;
+async function runDashDownload(resource, videoRep, audioRep, run) {
+  const signal = run.controller.signal;
+  const videoTrack = videoRep ? await downloadDashTrack(videoRep, "视频流", signal) : null;
+  const audioTrack = audioRep ? await downloadDashTrack(audioRep, "音频流", signal) : null;
+  checkCanceled(run);
   const title = resource.title || "video";
   if (videoTrack && audioTrack) {
     setStatus("正在合并音视频…");
     const outExt = videoTrack.ext === "webm" ? "webm" : "mp4";
     const merged = await mergeWithFFmpeg(videoTrack.buffer, audioTrack.buffer, `merged.${outExt}`, videoTrack.ext, audioTrack.ext);
+    checkCanceled(run);
     saveBlob(merged, outExt === "webm" ? "video/webm" : "video/mp4", outputName(title, outExt, videoRep?.height));
   } else if (videoTrack) {
     saveBlob(videoTrack.buffer, videoTrack.mime || "video/mp4", outputName(title, videoTrack.ext, videoRep?.height));
@@ -674,23 +858,38 @@ async function runDashDownload(resource, videoRep, audioRep) {
   log("DASH 下载完成。");
 }
 
-async function downloadDirect(resource) {
+async function downloadDirect(resource, run) {
   setStatus("正在下载…");
-  let received = 0;
-  const buffer = await downloadBuffer(resource.url, {
-    retries: 3,
-    timeout: 300000,
-    onProgress: ({ received: r }) => { received = r; setStatus(`正在下载… ${formatSize(received)}`); }
-  });
   const ext = resource.ext || "mp4";
   const mime = resource.kind === "audio" ? "audio/mp4" : "video/mp4";
+  let buffer = null;
+  // 跨域直连优先后台（豁免页面 CORS / CSP）；失败回退页内，保证不比旧版差。
+  if (isCrossOrigin(resource.url)) {
+    try {
+      const result = await requestDirectBackground({ url: resource.url, ext });
+      checkCanceled(run);
+      buffer = result.buffer;
+    } catch (error) {
+      if (run.canceled || isPolicyError(error)) throw error;
+      log("后台下载失败，回退页内重试：", error?.message || error);
+    }
+  }
+  if (!buffer) {
+    buffer = await downloadBuffer(resource.url, {
+      retries: 3,
+      timeout: 300000,
+      signal: run.controller.signal,
+      onProgress: ({ received }) => setStatus(`正在下载… ${formatSize(received)}`)
+    });
+  }
+  checkCanceled(run);
   saveBlob(buffer, mime, outputName(resource.title, ext));
   setStatus("已完成，已触发浏览器保存。");
   log("下载完成：", resource.url);
 }
 
 // ---- 清晰度/音轨选择控件渲染 -------------------------------------------------
-function renderStreamControls(resource, videoOptions, audioOptions, run) {
+function renderStreamControls(resource, videoOptions, audioOptions, execute) {
   clearPanel();
   setStatus("");
   const videoSelect = makeSelect(videoOptions);
@@ -699,24 +898,25 @@ function renderStreamControls(resource, videoOptions, audioOptions, run) {
   button.className = "primary-button";
   button.type = "button";
   button.textContent = "下载";
-  button.addEventListener("click", async () => {
-    if (isBusy) return;
+  wireCancelButton(button, run => {
     const video = videoOptions[Number(videoSelect.value)]?.value ?? null;
     const audio = audioOptions[Number(audioSelect.value)]?.value ?? null;
-    isBusy = true;
-    button.disabled = true;
-    try {
-      await run(video, audio);
-    } catch (error) {
-      log("下载失败：", error?.message || error);
-      setStatus("下载失败：" + (error?.message || error));
-    } finally {
-      isBusy = false;
-      button.disabled = false;
-    }
+    return execute(video, audio, run);
   });
   ui.controls.append(makeField("视频", videoSelect), makeField("音频", audioSelect), button);
-  setOpen(true);
+}
+
+// 清单文本获取：跨域优先后台探测（豁免 CORS / CSP），失败回退页内。
+async function fetchManifestText(resource, url, signal) {
+  if (!resource.youtube && isCrossOrigin(url)) {
+    try {
+      return (await requestHlsProbe(url)).text;
+    } catch (error) {
+      if (isPolicyError(error)) throw error;
+      log("后台清单探测失败，回退页内重试：", error?.message || error);
+    }
+  }
+  return fetchText(url, signal);
 }
 
 async function openHls(resource) {
@@ -726,14 +926,31 @@ async function openHls(resource) {
   setTitle(resource.title || resource.url);
   clearPanel();
   setStatus("正在解析清单…");
-  const text = await fetchText(resource.url);
+  const text = await fetchManifestText(resource, resource.url);
   if (isMasterPlaylist(text)) {
     const master = parseMaster(text, resource.url);
     if (!master.variants.length) { showEmpty("未找到可用的清晰度。"); return; }
-    const videoOptions = master.variants.map(variant => ({
-      label: [variant.height ? `${variant.height}p` : "", variant.bandwidth ? `${(variant.bandwidth / 1e6).toFixed(2)}Mbps` : "", variant.name].filter(Boolean).join(" · ") || variant.url,
-      value: variant
-    }));
+    // 时长优先用资源自带（YouTube lengthSeconds）；否则取首个变体媒体清单。
+    let duration = resource.duration || 0;
+    if (!duration) {
+      try {
+        const firstUrl = master.variants[0].url;
+        duration = parseMedia(await fetchManifestText(resource, firstUrl), firstUrl).totalDuration;
+      } catch {
+        // 取不到时长就不显示预估大小，不影响下载。
+      }
+    }
+    const videoOptions = master.variants.map(variant => {
+      const estimatedBytes = duration && variant.bandwidth ? Math.round(variant.bandwidth / 8 * duration) : 0;
+      variant.estimatedBytes = estimatedBytes;
+      const label = [
+        variant.height ? `${variant.height}p` : "",
+        variant.bandwidth ? `${(variant.bandwidth / 1e6).toFixed(2)}Mbps` : "",
+        estimatedBytes ? `约 ${formatSize(estimatedBytes)}` : "",
+        variant.name
+      ].filter(Boolean).join(" · ") || variant.url;
+      return { label, value: variant };
+    });
     // 音轨去重（按 URL）；同名音轨追加语言/itag 以区分。
     const seenAudio = new Set();
     const renditions = master.audioRenditions.filter(rendition => {
@@ -761,7 +978,7 @@ async function openHls(resource) {
     });
     audioOptions.sort((a, b) => (b.value?.default ? 1 : 0) - (a.value?.default ? 1 : 0));
     audioOptions.push({ label: "无（仅视频）", value: null });
-    renderStreamControls(resource, videoOptions, audioOptions, (variant, rendition) => runHlsDownload(resource, variant, rendition));
+    renderStreamControls(resource, videoOptions, audioOptions, (variant, rendition, run) => runHlsDownload(resource, variant, rendition, run));
     ui.logConsole.section(resource.youtube ? "YouTube HLS" : "HLS 主清单", resource.youtube ? "youtube" : "hls");
     ui.logConsole.id({ 清晰度: master.variants.length, 音轨: renditions.length });
     ui.logConsole.link("主清单", resource.url);
@@ -769,7 +986,7 @@ async function openHls(resource) {
     const media = parseMedia(text, resource.url);
     if (media.drm) { showEmpty("该 HLS 流受 DRM 保护，无法下载。"); return; }
     if (!media.endList && !resource.youtube) { showEmpty("这是直播流，不支持完整下载。"); return; }
-    renderStreamControls(resource, [{ label: `默认 (${formatDuration(media.totalDuration)})`, value: null }], [], () => runHlsDownload(resource, null, null));
+    renderStreamControls(resource, [{ label: `默认 (${formatDuration(media.totalDuration)})`, value: null }], [], (video, audio, run) => runHlsDownload(resource, null, null, run));
     ui.logConsole.section(resource.youtube ? "YouTube HLS" : "HLS 媒体清单", resource.youtube ? "youtube" : "hls");
     ui.logConsole.id({ 时长: formatDuration(media.totalDuration) });
     ui.logConsole.link("媒体清单", resource.url);
@@ -791,7 +1008,7 @@ async function openDash(resource) {
   if (mpd.audio.length) videoOptions.push({ label: "无（仅下载音频）", value: null });
   const audioOptions = mpd.audio.map(representation => ({ label: representationLabel(representation), value: representation }));
   if (mpd.video.length) audioOptions.push({ label: "无（仅下载视频）", value: null });
-  renderStreamControls(resource, videoOptions, audioOptions, (videoRep, audioRep) => runDashDownload(resource, videoRep, audioRep));
+  renderStreamControls(resource, videoOptions, audioOptions, (videoRep, audioRep, run) => runDashDownload(resource, videoRep, audioRep, run));
   ui.logConsole.section("DASH", "dash");
   ui.logConsole.id({ 视频流: mpd.video.length, 音频流: mpd.audio.length });
   ui.logConsole.link("MPD", resource.url);
@@ -811,15 +1028,14 @@ function renderGeneric(resources) {
     showEmpty("暂未发现可下载的媒体资源。播放视频后会自动嗅探。");
     return;
   }
-  setOpen(true);
   for (const resource of usable) {
     const label = resource.title || resource.host || resource.url;
     const sizeText = [resource.kind.toUpperCase(), resource.size ? formatSize(resource.size) : "", resource.info || ""].filter(Boolean).join(" · ");
-    const card = makeCard(label, sizeText, async () => {
+    const card = makeCard(label, sizeText, async run => {
       if (resource.kind === "hls") await openHls(resource);
       else if (resource.kind === "dash") await openDash(resource);
-      else await downloadDirect(resource);
-    });
+      else await downloadDirect(resource, run);
+    }, resource.kind !== "hls" && resource.kind !== "dash");
     if (resource.kind === "hls" || resource.kind === "dash") {
       card.querySelector("button").textContent = "选择清晰度";
     }
@@ -901,7 +1117,25 @@ function startUniversalPanel() {
           else pending.resolve({ buffer: data.buffer, ext: data.ext, height: data.height });
         }
       } else if (data.type === "hls-progress") {
-        if (hlsPending.has(data.requestId)) setStatus(data.text || "");
+        if (hlsPending.has(data.requestId) && !activeRun?.canceled) setStatus(data.text || "");
+      } else if (data.type === "direct-result") {
+        const pending = directPending.get(data.requestId);
+        if (pending) {
+          clearTimeout(pending.timer);
+          directPending.delete(data.requestId);
+          if (data.error) pending.reject(new Error(data.error));
+          else pending.resolve({ buffer: data.buffer, ext: data.ext });
+        }
+      } else if (data.type === "direct-progress") {
+        if (directPending.has(data.requestId) && !activeRun?.canceled) setStatus(data.text || "");
+      } else if (data.type === "hls-probe-result") {
+        const pending = probePending.get(data.requestId);
+        if (pending) {
+          clearTimeout(pending.timer);
+          probePending.delete(data.requestId);
+          if (data.error) pending.reject(new Error(data.error));
+          else pending.resolve({ text: data.text, master: data.master });
+        }
       } else {
         handleRelayMessage(data);
       }
