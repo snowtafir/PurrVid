@@ -4,6 +4,42 @@
 
 格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## 1.0.5 - 2026-11-20
+
+### 变更
+
+- **解析日志默认收起**：日志标题栏新增「展开 / 收起」按钮（B 站 / YouTube / 通用三面板共用同一日志控制台），默认收起只留标题栏，日志内容保留、随时可展开；收起态下「清空」仍可用。
+- README（中英）版本徽章与功能描述同步至当前实际行为（后台跨域下载、面板内进度与取消）。
+
+## 1.0.4 - 2026-11-20
+
+> 仅上架 AMO；GitHub Release 跳过该标签，自托管渠道直接发布 1.0.5（含本版本全部改动）。
+
+### 新增
+
+- **通用面板跨域下载能力**：跨域直连媒体与 HLS（含主清单探测）改经后台扩展上下文下载，host_permissions 豁免页面 CORS / CSP——原本因缺 CORS 头或严格 `connect-src` 下不了的跨域资源现在可下。同源资源与 DASH 仍全程页内，行为与旧版一致；B 站 / YouTube 路径不变。
+- **任务级 DNR Referer/Origin 补全**（`lib/request-headers.js`）：后台下载按任务注册临时会话规则，补真实页面 Referer（完整 URL）与 Origin；`initiatorDomains` 限定扩展自身域，只命中扩展后台请求，播放器自身请求不受影响；任务结束即移除，浏览器重启自动清空。
+- **失败回退页内**：后台直连 / HLS 下载 / 清单探测遇网络或鉴权失败时自动回退现有页内路径，保证旧版能下的资源不回归；DRM / 直播为明确拒绝，不做无谓重试。
+- **下载中原地取消**：点击下载后按钮原地切换为「取消下载」（复用同一元素），再点一次即取消——页内下载经 AbortController 立即中断，后台下载经 `cancel-download` 消息中断并即时释放按钮，迟到的后台结果直接丢弃；取消为终态，不触发回退重试。通用直连 / HLS / DASH、YouTube 与 B 站合并/分开下载均支持（B 站 CDN 下载中断后不重试备用链接，ffmpeg 合并阶段取消即时生效）。
+- **HLS 清晰度预估大小**：清晰度选项显示「约 ××MB」（带宽 × 时长估算）；时长优先取资源自身（YouTube `lengthSeconds`），否则探测首个变体媒体清单累计时长。
+- **字节级下载进度**：HLS 分片下载进度由「已完成段数」细化为实时字节数（如 `视频分段 1/120 · 3.20MB / 约 45.00MB`），页内与后台路径一致，200ms 节流刷新。
+
+### 修复
+
+- **取消无法中断进行中的分片下载**：`fetchWithRetry` 返回响应头后即解除外部取消信号绑定，body 流式读取阶段 abort 失效；`downloadBuffer` 现在在 body 阶段自行监听取消信号并中断读取、关闭流。
+- **后台下载超时后任务仍在跑**：面板桥接 30 分钟超时原先只本地放弃，后台继续下载且面板回退页内造成重复下载；超时现在同步发送 `cancel-download` 中断后台任务。
+- **YouTube 大文件分块下载进度回跳**：并发 Range 分块各自从 0 计字节并互相覆盖进度文本；改为汇总已完成块 + 在途块实时字节（200ms 节流），与 HLS 进度一致。
+
+### 变更
+
+- 后台新增 `direct-download` / `hls-probe` 消息与 `direct-progress` 进度；通用 HLS 复用 `hls-download`（附带 `pageUrl` 触发 DNR 防护与直播拒绝）。relay 同步转发新契约。
+- 后台 HLS 下载对通用资源补直播（无 ENDLIST）拒绝，与页内判据一致。
+- 构建产物随包附带 `LICENSE`（GPL-3.0 全文）与 `NOTICE`（第三方声明），满足 GPL 分发副本须附许可证的要求。
+- **默认不再主动弹出下载面板**：嗅探到资源时只显示右下角悬浮按钮，不再自动展开面板打扰用户（B 站 / YouTube / 通用站点一致）。是否展开仍记住用户上次的手动选择（`localStorage.purrvid_show`），popup「调出面板」与悬浮按钮点击照常展开。
+- **B 站面板改用 DOM API 构建**：标题、下载卡片、设置区不再拼接 `innerHTML`，全部 `createElement` / `textContent`，天然防 XSS 并兼容 Trusted Types CSP；加载动画由内联 SVG 改为 CSS spinner。
+- **面板样式改用 constructable stylesheet**：B 站与通用面板的 Shadow DOM 样式优先经 `adoptedStyleSheets` 注入（不受页面 `style-src 'unsafe-inline'` 限制），不支持时回退 `<style>`。
+- **B 站合并下载的 ffmpeg 迁至后台**：音视频合并改经 relay 委托后台扩展上下文执行（与 YouTube 同一通道），页面不再以 blob URL 建 ffmpeg Worker，规避页面 `worker-src` 收紧；playurl 解析与 CDN 字节下载仍留页内（保留正确的 bilibili Referer 与 Cookie 附带）。
+
 ## 1.0.3 - 2026-11-18
 
 ### 变更

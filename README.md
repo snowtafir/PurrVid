@@ -14,7 +14,7 @@ English · [简体中文](README.zh-CN.md) · [Changelog](CHANGELOG.md)
 ![Firefox 140+](https://img.shields.io/badge/Firefox-140%2B-FF7139?logo=firefoxbrowser&logoColor=white)
 ![Chrome 116+](https://img.shields.io/badge/Chrome-116%2B-4285F4?logo=googlechrome&logoColor=white)
 ![ffmpeg.wasm](https://img.shields.io/badge/ffmpeg-wasm-007808?logo=ffmpeg&logoColor=white)
-![Version](https://img.shields.io/badge/version-1.0.3-blue)
+![Version](https://img.shields.io/badge/version-1.0.5-blue)
 ![License: GPL v3](https://img.shields.io/badge/License-GPL%20v3-blue.svg)
 ![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen)
 
@@ -34,7 +34,7 @@ The whole project is plain ES modules (no bundler, no framework). One shared cod
 - **Generic sites** — automatic media sniffing surfaces HLS / DASH / direct links in the same panel.
 - **Bilibili** — videos and bangumi (anime), multi-part pages, quality follows the player. Three download modes: merge, separate, or hand off to the browser.
 - **YouTube** — HLS streams with quality / audio-track selection.
-- **Background downloads** — a dedicated tasks page with concurrency control for HLS / DASH / YouTube / direct resources.
+- **Background downloads** — cross-origin HLS / direct resources are fetched by the extension background, bypassing page CORS / CSP; every download path shows byte-level progress and can be canceled in place.
 - **Muxing in the browser** — audio + video are merged locally with `ffmpeg.wasm`; no server involved.
 - **Cross-browser** — Firefox (event page) and Chrome (service worker + offscreen document) from a single source.
 
@@ -84,7 +84,7 @@ Go to the [Releases page](https://github.com/snowtafir/PurrVid/releases), downlo
 
 ### YouTube & generic sites
 
-The same panel lists the sniffed HLS / DASH / direct resources. YouTube uses HLS; pick the quality and (when available) the audio track. Larger HLS / DASH jobs can run in the background and are managed on the **tasks page**, which opens automatically when a background download starts.
+The same panel lists the sniffed HLS / DASH / direct resources. YouTube uses HLS; pick the quality and (when available) the audio track, with an estimated size per quality. Cross-origin resources are downloaded through the extension background, bypassing the page's CORS / CSP restrictions; progress is shown in the panel and any download can be canceled in place.
 
 ### Popup
 

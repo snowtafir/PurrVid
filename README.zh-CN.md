@@ -14,7 +14,7 @@
 ![Firefox 140+](https://img.shields.io/badge/Firefox-140%2B-FF7139?logo=firefoxbrowser&logoColor=white)
 ![Chrome 116+](https://img.shields.io/badge/Chrome-116%2B-4285F4?logo=googlechrome&logoColor=white)
 ![ffmpeg.wasm](https://img.shields.io/badge/ffmpeg-wasm-007808?logo=ffmpeg&logoColor=white)
-![Version](https://img.shields.io/badge/version-1.0.3-blue)
+![Version](https://img.shields.io/badge/version-1.0.5-blue)
 ![License: GPL v3](https://img.shields.io/badge/License-GPL%20v3-blue.svg)
 ![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen)
 
@@ -34,7 +34,7 @@
 - **通用站点** —— 自动嗅探媒体请求，把 HLS / DASH / 直连资源汇总到同一个面板。
 - **B 站** —— 投稿视频与番剧、多 P 分集，清晰度跟随播放器；三种下载方式：合并、分开、交给浏览器。
 - **YouTube** —— HLS 流，支持清晰度 / 音轨选择。
-- **后台下载** —— 独立的任务管理页，支持并发控制，覆盖 HLS / DASH / YouTube / 直连四类资源。
+- **后台下载** —— 跨域 HLS / 直连资源经扩展后台下载，豁免页面 CORS / CSP 限制；全部下载路径支持字节级进度与原地取消。
 - **浏览器内合并** —— 音视频通过 `ffmpeg.wasm` 在本地合并，不经过任何服务器。
 - **跨浏览器** —— 同一份源码适配 Firefox（事件页）与 Chrome（service worker + offscreen 文档）。
 
@@ -84,7 +84,7 @@
 
 ### YouTube 与通用站点
 
-同一个面板会列出嗅探到的 HLS / DASH / 直连资源。YouTube 走 HLS，可选择清晰度与（如有）音轨。较大的 HLS / DASH 任务可放到后台执行，由 **任务管理页** 统一管理——发起后台下载时该页会自动打开。
+同一个面板会列出嗅探到的 HLS / DASH / 直连资源。YouTube 走 HLS，可选择清晰度与（如有）音轨，并显示各清晰度的预估大小。跨域资源经扩展后台下载，豁免页面 CORS / CSP 限制；进度在面板内实时显示，下载中可原地取消。
 
 ### 弹窗
 

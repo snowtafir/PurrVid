@@ -11,20 +11,28 @@
 //     { type:"ready" }                         面板就绪，请求资源列表
 //     { type:"ffmpeg", requestId, op, ... }    请求合并/转封装（op: merge|remux）
 //     { type:"hls-download", requestId, ... }  请求后台下载 HLS（mediaUrl/audioUrl/title/height）
+//     { type:"direct-download", requestId, url, ext }  请求后台下载跨域直连媒体
+//     { type:"hls-probe", requestId, url }     请求后台探测 HLS 清单（跨域无 CORS 时）
+//     { type:"cancel-download", requestId }    取消指定后台下载（中断网络阶段）
 //   relay → 面板（from:"relay"）
 //     { type:"resources", resources }          当前标签页嗅探到的资源
 //     { type:"ffmpeg-result", requestId, buffer|error }
 //     { type:"hls-result", requestId, buffer, ext, height | error }
 //     { type:"hls-progress", requestId, text } 下载进度文本
+//     { type:"direct-result", requestId, buffer, ext | error }
+//     { type:"direct-progress", requestId, text }
+//     { type:"hls-probe-result", requestId, text, master | error }
 //     { type:"floating-enabled", value }       悬浮按钮是否常驻
 //     { type:"inject-panel" }                  通知 MAIN world bootstrap 按需注入面板
 //     { type:"open-panel" }                    调出（展开）面板
 //
 // runtime 消息（↔ background/service-worker.js）：
-//   get-resources / resources-updated / ffmpeg / hls-download / hls-progress
+//   get-resources / resources-updated / ffmpeg / hls-download / hls-progress /
+//   direct-download / direct-progress / hls-probe
 //   floating-enabled(→所有标签页) / open-panel(→活动标签页) / panel-activate(→有资源的标签页)
-//   Firefox：ffmpeg/hls-download 直传二进制（结构化克隆）。
+//   Firefox：ffmpeg/hls-download/direct-download 直传二进制（结构化克隆）。
 //   Chrome：经 lib/transport.js 的 base64 分片 Port（runtime 消息仅 JSON 且有大小限制）。
+//   后台下载统一附带 pageUrl（本框架 location.href），供任务级 DNR 补 Referer/Origin。
 // ============================================================================
 (() => {
   "use strict";
@@ -83,6 +91,7 @@
   api.runtime.onMessage.addListener(message => {
     if (message?.type === "resources-updated") pushResources();
     if (message?.type === "hls-progress") post("hls-progress", { requestId: message.requestId, text: message.text });
+    if (message?.type === "direct-progress") post("direct-progress", { requestId: message.requestId, text: message.text });
     if (message?.type === "floating-enabled") { floatingEnabled = message.value !== false; postFloating(); }
     // 嗅探到媒体：通知 MAIN world bootstrap 注入面板（悬浮按钮随之出现）。
     if (message?.type === "panel-activate") post("inject-panel");
@@ -137,16 +146,65 @@
           mediaUrl: data.mediaUrl,
           audioUrl: data.audioUrl,
           title: data.title,
-          height: data.height
+          height: data.height,
+          pageUrl: data.pageUrl || "",
+          estimatedBytes: data.estimatedBytes || 0
         });
         if (!response?.ok) throw new Error(response?.error || "下载失败");
         result = response;
       } else {
-        result = await sendHeavy("hls", { requestId, mediaUrl: data.mediaUrl, audioUrl: data.audioUrl, title: data.title, height: data.height }, {});
+        result = await sendHeavy("hls", { requestId, mediaUrl: data.mediaUrl, audioUrl: data.audioUrl, title: data.title, height: data.height, pageUrl: data.pageUrl || "", estimatedBytes: data.estimatedBytes || 0 }, {});
       }
       window.postMessage({ source: RELAY_SOURCE, from: "relay", type: "hls-result", requestId, buffer: result.buffer, ext: result.ext, height: result.height }, "*", [result.buffer]);
     } catch (error) {
       window.postMessage({ source: RELAY_SOURCE, from: "relay", type: "hls-result", requestId, error: String(error?.message || error) }, "*");
+    }
+  });
+
+  // ---- 通用直连后台下载：跨域资源豁免页面 CORS / CSP，任务级 DNR 补 Referer ----
+  window.addEventListener("message", async event => {
+    const data = event.data;
+    if (data?.source !== RELAY_SOURCE || data.from !== "panel" || data.type !== "direct-download") return;
+    const { requestId } = data;
+    try {
+      let result;
+      if (IS_FIREFOX) {
+        const response = await api.runtime.sendMessage({
+          type: "direct-download",
+          requestId,
+          url: data.url,
+          ext: data.ext,
+          pageUrl: location.href
+        });
+        if (!response?.ok) throw new Error(response?.error || "下载失败");
+        result = response;
+      } else {
+        result = await sendHeavy("direct", { requestId, url: data.url, ext: data.ext, pageUrl: location.href }, {});
+      }
+      window.postMessage({ source: RELAY_SOURCE, from: "relay", type: "direct-result", requestId, buffer: result.buffer, ext: result.ext }, "*", [result.buffer]);
+    } catch (error) {
+      window.postMessage({ source: RELAY_SOURCE, from: "relay", type: "direct-result", requestId, error: String(error?.message || error) }, "*");
+    }
+  });
+
+  // ---- 取消后台下载：小 JSON 直发；面板侧已自行 settle，无需回包 --------------
+  window.addEventListener("message", event => {
+    const data = event.data;
+    if (data?.source !== RELAY_SOURCE || data.from !== "panel" || data.type !== "cancel-download") return;
+    api.runtime.sendMessage({ type: "cancel-download", requestId: data.requestId }).catch(() => {});
+  });
+
+  // ---- HLS 清单后台探测：仅取回清单原文（小 JSON，无需 heavy 通道） ------------
+  window.addEventListener("message", async event => {
+    const data = event.data;
+    if (data?.source !== RELAY_SOURCE || data.from !== "panel" || data.type !== "hls-probe") return;
+    const { requestId } = data;
+    try {
+      const response = await api.runtime.sendMessage({ type: "hls-probe", requestId, url: data.url, pageUrl: location.href });
+      if (!response?.ok) throw new Error(response?.error || "清单探测失败");
+      post("hls-probe-result", { requestId, text: response.text, master: response.master });
+    } catch (error) {
+      post("hls-probe-result", { requestId, error: String(error?.message || error) });
     }
   });
 

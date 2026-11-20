@@ -2,7 +2,8 @@
 // build.mjs — 由根目录共享核心组装 Firefox 与 Chrome 两个扩展产物
 // ----------------------------------------------------------------------------
 // 共享核心即本目录（根）：manifest.json lib/ content/ tasks/ background/
-//   universal-panel.js bilibili-engine.js popup.* icon*.png vendor/ offscreen/。
+//   universal-panel.js bilibili-engine.js popup.* icon*.png vendor/ offscreen/
+//   LICENSE NOTICE（GPL 合规随包附带）。
 // 本脚本把上述文件复制到 dist/ 下按版本命名的目录：
 //   dist/PurrVid-firefox-v{version}  —— Firefox 公开（listed）版：清单去掉 gecko.update_url
 //     （AMO 公开渠道上传校验禁止 update_url，仅自托管渠道允许）
@@ -34,6 +35,8 @@ const DIST = path.join(ROOT, "dist");
 const INCLUDE = [
   "popup.html", "popup.js", "icon.png", "icon-16.png", "icon-48.png",
   "bilibili-engine.js", "universal-panel.js",
+  // GPL-3.0 第 4 条：分发副本须附许可证副本；NOTICE 保留 ffmpeg.wasm 等第三方声明。
+  "LICENSE", "NOTICE",
   "background", "content", "tasks", "lib", "vendor", "offscreen"
 ];
 
