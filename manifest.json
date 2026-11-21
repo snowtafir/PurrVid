@@ -1,6 +1,6 @@
 {
   "name": "PurrVid-星喵助手",
-  "version": "1.0.5",
+  "version": "1.0.6",
   "description": "一只帮你保存网页视频的星空猫娘：在视频页内直接下载你有权保存的 HLS / DASH / 直连媒体。",
   "manifest_version": 3,
   "background": {
@@ -105,6 +105,7 @@
         "lib/transport.js",
         "lib/paw.js",
         "lib/log-console.js",
+        "lib/panel-position.js",
         "icon.png",
         "vendor/ffmpeg/ffmpeg.worker.js",
         "vendor/ffmpeg/ffmpeg-core.js",

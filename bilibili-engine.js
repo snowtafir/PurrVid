@@ -16,13 +16,14 @@
 //   - import { initUniversalPanel } from "./universal-panel.js"
 //   - 面板宿主 id "purrvid-host"（与 content/loader.js 全屏 CSS 共享）
 //   - localStorage：purrvid_show / purrvid_download_mode /
-//     purrvid_merge_mode / bilibili_player_settings
+//     purrvid_pos / bilibili_player_settings
 //   - 资产：lib/paw.js、vendor/ffmpeg/*（均须在 web_accessible_resources）
 // ============================================================================
 
 import { initUniversalPanel } from "./universal-panel.js";
 import { PAW_URL } from "./lib/paw.js";
 import { LOG_CSS, createLogConsole } from "./lib/log-console.js";
+import { attachDelayedHover, createPositionController, panelOpenStartFrame } from "./lib/panel-position.js";
 
 // ---- 1. 常量与状态 -----------------------------------------------------------
 const HOST_ID = "purrvid-host";
@@ -61,7 +62,6 @@ const isVideoPage = () => /\/video\/(av|bv)[0-9a-zA-Z]+/i.test(window.location.p
 const isBangumiPage = () => /\/bangumi\/play\/\S+/i.test(window.location.pathname);
 
 const isAdvancedMode = () => localStorage.purrvid_download_mode !== "normal";
-const isMergeOn = () => localStorage.purrvid_merge_mode !== "off";
 // 默认收起（仅悬浮按钮），不主动展开打扰用户；仅当用户曾手动展开（purrvid_show==="show"）时才展开。
 const isHidden = () => localStorage.purrvid_show !== "show";
 
@@ -637,7 +637,11 @@ a.disabled:hover {
   padding: 12px 14px 10px;
   background: linear-gradient(180deg, rgba(255, 255, 255, .76), rgba(255, 255, 255, 0));
   backdrop-filter: blur(12px);
-  pointer-events: none;
+  -webkit-backdrop-filter: blur(12px);
+  pointer-events: auto;
+  cursor: move;
+  user-select: none;
+  touch-action: none;
 }
 #panel-title {
   display: inline-flex;
@@ -720,7 +724,9 @@ a.disabled:hover {
   right: 0;
   box-sizing: border-box;
   flex: 0 0 auto;
-  width: 48px;
+  width: max-content;
+  min-width: 48px;
+  max-width: 48px;
   height: 48px;
   min-height: 48px;
   gap: 0;
@@ -729,19 +735,27 @@ a.disabled:hover {
   border-radius: 50%;
   background: rgba(255, 255, 255, .48);
   box-shadow: 0 0 0 3px rgba(244, 90, 141, .16), 0 0 22px 8px rgba(244, 90, 141, .36);
-  transition: width .22s ease, gap .22s ease, padding .22s ease, border-radius .22s ease, opacity .22s ease, background .22s ease, box-shadow .22s ease;
+  cursor: grab;
+  touch-action: none;
+  user-select: none;
+  -webkit-user-drag: none;
+  transition: max-width .28s cubic-bezier(.2,.8,.2,1), gap .28s cubic-bezier(.2,.8,.2,1), padding .28s cubic-bezier(.2,.8,.2,1), border-radius .28s cubic-bezier(.2,.8,.2,1), opacity .22s ease, background .22s ease, box-shadow .22s ease;
 }
 .hide #toggle .toggle-icon {
   width: 34px;
   height: 34px;
+  pointer-events: none;
+  -webkit-user-drag: none;
 }
 .hide #toggle .toggle-label {
   max-width: 0;
   opacity: 0;
+  transition: max-width .28s cubic-bezier(.2,.8,.2,1), opacity .18s ease;
 }
-.hide #toggle:hover,
+/* max-width 贴近提示条实际宽度，避免按钮先展开到内容宽度后停顿。 */
+.hide #toggle.fab-hover,
 .hide #toggle:focus-visible {
-  width: 176px;
+  max-width: 150px;
   flex-direction: row;
   justify-content: flex-start;
   gap: 9px;
@@ -751,10 +765,15 @@ a.disabled:hover {
   background: rgba(255, 255, 255, .94);
   box-shadow: 0 0 0 2px rgba(244, 90, 141, .18), 0 0 20px 6px rgba(244, 90, 141, .28);
 }
-.hide #toggle:hover .toggle-label,
+.hide #toggle.fab-hover .toggle-label,
 .hide #toggle:focus-visible .toggle-label {
   max-width: 180px;
   opacity: 1;
+}
+/* 按钮靠近左边缘时提示条改向右展开（方向由位置控制器写 data-fab-side）。 */
+:host([data-fab-side="right"]) .hide #toggle {
+  left: 0;
+  right: auto;
 }
 .btn-large:hover {
   opacity: 1;
@@ -890,9 +909,8 @@ function buildSettings() {
   const select = document.createElement("select");
   select.id = "setting-download-mode";
   for (const [value, text] of [
-    ["merge", "合并下载（音视频合一）"],
-    ["separate", "分开下载（音频/视频独立）"],
-    ["browser", "浏览器下载（省内存）"]
+    ["merge", "合并下载（音视频合一，也可单独下载）"],
+    ["browser", "浏览器下载（省内存，需手动合并）"]
   ]) {
     const option = document.createElement("option");
     option.value = value;
@@ -902,7 +920,7 @@ function buildSettings() {
   field.append(span, select);
   const note = document.createElement("p");
   note.className = "b-note";
-  note.textContent = "清晰度跟随 B站播放器，切换后自动更新。合并/分开下载时请勿刷新或关闭页面，也不要切换分集和清晰度。";
+  note.textContent = "清晰度跟随 B站播放器，切换后自动更新。下载进行中请勿刷新或关闭页面，也不要切换分集和清晰度。";
   wrap.append(field, note);
   return wrap;
 }
@@ -977,7 +995,7 @@ function buildDownloadCards({ title, code, dash, durl }) {
     } else {
       a.setAttribute("download", name + ".mp4");
       a.href = item.url;
-      a.textContent = "打开" + label + "主链接";
+      a.textContent = "打开" + label + "主链接或右键保存";
     }
     li.appendChild(a);
     if (advanced) {
@@ -989,7 +1007,8 @@ function buildDownloadCards({ title, code, dash, durl }) {
     frag.appendChild(li);
   });
 
-  if (advanced && hasDash && isMergeOn()) {
+  // 合并卡片与单流卡片同屏：合并下载与单独下载不再拆成两种模式。
+  if (advanced && hasDash) {
     const entries = items.map(({ item }) => item);
     const encoded = encodeURIComponent(JSON.stringify(entries));
     const total = entries.reduce((sum, item) => sum + (item.size || 0), 0);
@@ -1021,13 +1040,14 @@ function wirePanel(shadowRoot) {
   const toggle = shadowRoot.getElementById("toggle");
   const content = shadowRoot.getElementById("content");
   const host = document.getElementById(HOST_ID);
+  const positionController = createPositionController(host, shadowRoot.getElementById("actions"));
   logConsole = createLogConsole(shadowRoot.getElementById("purrvid-logs"), { title: "解析日志" });
   const disableSettings = () => { modeSelect.disabled = true; };
   const enableSettings = () => { modeSelect.disabled = false; };
   let panelAnimation = null, buttonAnimation = null;
 
   const setOpen = (open, animate = true) => {
-    const from = host.getBoundingClientRect();
+    const from = toggle.getBoundingClientRect();
     if (panelAnimation) { panelAnimation.cancel(); panelAnimation = null; }
     if (buttonAnimation) { buttonAnimation.cancel(); buttonAnimation = null; }
     localStorage.purrvid_show = open ? "show" : "hide";
@@ -1039,7 +1059,7 @@ function wirePanel(shadowRoot) {
     if (!open) {
       content.classList.add("hide");
       setToggleLabel(label);
-      host.style.cssText = "display:block;position:fixed;z-index:" + Number.MAX_SAFE_INTEGER + ";top:auto;right:12px;bottom:12px;left:auto;margin:0;width:48px;height:48px;max-height:none;overflow:visible;border:0;background:transparent;box-shadow:none;backdrop-filter:none;";
+      host.style.cssText = "display:block;position:fixed;z-index:" + Number.MAX_SAFE_INTEGER + ";" + positionController.collapsedPosition() + ";margin:0;width:48px;height:48px;max-height:none;overflow:visible;border:0;background:transparent;box-shadow:none;backdrop-filter:none;";
       // 常驻关闭时收起态不留悬浮按钮，整个宿主隐藏。
       if (!floatingEnabled) host.style.display = "none";
       const reduceMotion = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
@@ -1055,20 +1075,21 @@ function wirePanel(shadowRoot) {
     }
     content.classList.remove("hide");
     setToggleLabel(label);
-    host.style.cssText = "display:block;position:fixed;z-index:" + Number.MAX_SAFE_INTEGER + ";top:auto;right:16px;bottom:16px;left:auto;margin:0;width:min(480px,calc(100vw - 32px));height:auto;max-height:min(78vh,640px);overflow:hidden;border:1px solid rgba(255,255,255,.82);border-radius:18px;background:rgba(255,255,255,.86);box-shadow:0 18px 60px rgba(35,48,74,.22);backdrop-filter:blur(20px);";
+    host.style.cssText = "display:block;position:fixed;z-index:" + Number.MAX_SAFE_INTEGER + ";left:0;top:0;right:auto;bottom:auto;margin:0;width:min(480px,calc(100vw - 32px));height:auto;max-height:min(78vh,640px);overflow:hidden;border:1px solid rgba(255,255,255,.82);border-radius:18px;background:rgba(255,255,255,.86);box-shadow:0 18px 60px rgba(35,48,74,.22);backdrop-filter:blur(20px);";
     const measured = host.getBoundingClientRect();
     host.style.height = measured.height + "px";
+    // 按锚点象限算落点：靠边/靠顶时反向展开并夹回视口，动画原点取靠近按钮的角。
+    const placement = positionController.placePanel(measured.width, measured.height);
     const target = host.getBoundingClientRect();
     if (!animate || typeof host.animate !== "function") {
       host.style.height = "auto";
       host.style.overflow = "auto";
       return;
     }
-    const scaleX = from.width / Math.max(target.width, 1), scaleY = from.height / Math.max(target.height, 1);
     const reduceMotion = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
     panelAnimation = host.animate([
-      { transform: "translate(" + (from.left - target.left) + "px," + (from.top - target.top) + "px) scale(" + scaleX + "," + scaleY + ")", transformOrigin: "top left", opacity: 0.82 },
-      { transform: "none", transformOrigin: "top left", opacity: 1 }
+      panelOpenStartFrame(from, target, placement),
+      { transform: "none", transformOrigin: placement.origin, opacity: 1 }
     ], { duration: reduceMotion ? 1 : 520, easing: "cubic-bezier(0.16,1,0.3,1)" });
     panelAnimation.onfinish = () => {
       panelAnimation = null;
@@ -1077,16 +1098,10 @@ function wirePanel(shadowRoot) {
     };
   };
 
-  modeSelect.value = !isAdvancedMode() ? "browser" : (isMergeOn() ? "merge" : "separate");
+  modeSelect.value = isAdvancedMode() ? "merge" : "browser";
   const refresh = () => shadowRoot.buildDownloadLinks();
   modeSelect.addEventListener("change", () => {
-    const value = modeSelect.value;
-    if (value === "browser") {
-      localStorage.purrvid_download_mode = "normal";
-    } else {
-      localStorage.purrvid_download_mode = "advanced";
-      localStorage.purrvid_merge_mode = value === "merge" ? "on" : "off";
-    }
+    localStorage.purrvid_download_mode = modeSelect.value === "browser" ? "normal" : "advanced";
     refresh();
   });
   downloads.addEventListener("click", event => {
@@ -1118,6 +1133,7 @@ function wirePanel(shadowRoot) {
     });
   });
   toggle.addEventListener("click", () => setOpen(isHidden()));
+  attachDelayedHover(toggle);
   setOpen(!isHidden(), false);
   panelOpen = setOpen;
 }
@@ -1144,7 +1160,7 @@ function renderPanel({ code, title, dash, quality, message, loading, durl }) {
   } else {
     host = document.createElement(HOST_ID);
     host.id = HOST_ID;
-    host.style.cssText = `display:block;position:fixed;z-index:${Number.MAX_SAFE_INTEGER};bottom:16px;right:16px;left:auto;width:min(480px,calc(100vw - 32px));max-height:min(78vh,640px);overflow:auto;border:1px solid rgba(255,255,255,.82);border-radius:18px;background:rgba(255,255,255,.86);box-shadow:0 18px 60px rgba(35,48,74,.22);backdrop-filter:blur(20px);`;
+    host.style.cssText = `display:block;position:fixed;z-index:${Number.MAX_SAFE_INTEGER};left:0;top:0;right:auto;bottom:auto;width:min(480px,calc(100vw - 32px));max-height:min(78vh,640px);overflow:auto;border:1px solid rgba(255,255,255,.82);border-radius:18px;background:rgba(255,255,255,.86);box-shadow:0 18px 60px rgba(35,48,74,.22);backdrop-filter:blur(20px);`;
     host.classList.toggle("hide", isHidden());
     document.body.appendChild(host);
     shadow = host.attachShadow({ mode: "open" });
@@ -1171,6 +1187,7 @@ function renderPanel({ code, title, dash, quality, message, loading, durl }) {
     icon.className = "toggle-icon";
     icon.src = PAW_URL;
     icon.alt = "";
+    icon.draggable = false;
     const toggleLabel = document.createElement("span");
     toggleLabel.className = "toggle-label";
     toggleLabel.textContent = label;

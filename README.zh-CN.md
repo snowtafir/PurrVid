@@ -14,7 +14,7 @@
 ![Firefox 140+](https://img.shields.io/badge/Firefox-140%2B-FF7139?logo=firefoxbrowser&logoColor=white)
 ![Chrome 116+](https://img.shields.io/badge/Chrome-116%2B-4285F4?logo=googlechrome&logoColor=white)
 ![ffmpeg.wasm](https://img.shields.io/badge/ffmpeg-wasm-007808?logo=ffmpeg&logoColor=white)
-![Version](https://img.shields.io/badge/version-1.0.5-blue)
+![Version](https://img.shields.io/badge/version-1.0.6-blue)
 ![License: GPL v3](https://img.shields.io/badge/License-GPL%20v3-blue.svg)
 ![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen)
 
@@ -30,9 +30,9 @@
 
 ## 功能特性
 
-- **页内面板** —— 常驻悬浮按钮，展开 / 收起带平滑动画，全程不离开当前页面。
+- **页内面板** —— 常驻悬浮按钮，展开 / 收起带平滑动画，全程不离开当前页面；按钮与面板可在视口内自由拖拽，拖拽位置自动记忆。
 - **通用站点** —— 自动嗅探媒体请求，把 HLS / DASH / 直连资源汇总到同一个面板。
-- **B 站** —— 投稿视频与番剧、多 P 分集，清晰度跟随播放器；三种下载方式：合并、分开、交给浏览器。
+- **B 站** —— 投稿视频与番剧、多 P 分集，清晰度跟随播放器；两种下载方式：合并（同屏也可单独下载音/视频）、交给浏览器。
 - **YouTube** —— HLS 流，支持清晰度 / 音轨选择。
 - **后台下载** —— 跨域 HLS / 直连资源经扩展后台下载，豁免页面 CORS / CSP 限制；全部下载路径支持字节级进度与原地取消。
 - **浏览器内合并** —— 音视频通过 `ffmpeg.wasm` 在本地合并，不经过任何服务器。
@@ -76,8 +76,7 @@
 
 | 方式 | 说明 |
 | --- | --- |
-| **合并下载** | 通过 `ffmpeg.wasm` 在本地把音视频合并为单个 MP4。 |
-| **分开下载** | 音频、视频分别保存为独立文件。 |
+| **合并下载** | 通过 `ffmpeg.wasm` 在本地把音视频合并为单个 MP4；同一列表也提供单流按钮，可单独保存音频/视频。 |
 | **浏览器下载** | 交给浏览器自带下载器，占用内存最低。 |
 
 > 清晰度始终跟随 B 站播放器，切换清晰度或分集后面板会自动刷新。合并 / 分开下载进行中，请勿刷新或关闭页面。

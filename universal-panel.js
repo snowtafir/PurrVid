@@ -48,6 +48,7 @@ import {
 } from "./lib/youtube.js";
 import { PAW_URL } from "./lib/paw.js";
 import { LOG_CSS, createLogConsole } from "./lib/log-console.js";
+import { attachDelayedHover, createPositionController, panelOpenStartFrame } from "./lib/panel-position.js";
 
 // ---- 常量 --------------------------------------------------------------------
 const HOST_ID = "purrvid-host";
@@ -61,16 +62,19 @@ const CSS = `
 * { box-sizing: border-box; }
 #content { display: block; width: 100%; font: 13px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif; color: #23304a; }
 #content.hide { display: none; }
-#actions { position: sticky; top: 0; z-index: 5; display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px 14px 10px; background: linear-gradient(180deg, rgba(255,255,255,.76), rgba(255,255,255,0)); backdrop-filter: blur(12px); }
+#actions { position: sticky; top: 0; z-index: 5; display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px 14px 10px; background: linear-gradient(180deg, rgba(255,255,255,.76), rgba(255,255,255,0)); backdrop-filter: blur(12px); cursor: move; user-select: none; touch-action: none; }
 #panel-title { display: inline-flex; align-items: center; min-width: 0; max-width: calc(100% - 130px); margin: 0; padding: 10px 18px; overflow: hidden; border: 1px solid rgba(255,255,255,.72); border-radius: 999px; background: rgba(255,255,255,.62); color: #000; box-shadow: 0 0 0 2px rgba(244,90,141,.12), 0 0 16px 3px rgba(244,90,141,.2), 0 8px 24px rgba(46,57,84,.16); backdrop-filter: blur(16px) saturate(150%); font-size: 13px; font-weight: 700; text-overflow: ellipsis; white-space: nowrap; }
 #toggle { display: inline-flex; align-items: center; justify-content: center; gap: 8px; padding: 10px 18px; min-height: 42px; border: 1px solid rgba(255,255,255,.72); border-radius: 999px; background: rgba(255,255,255,.62); color: #863b5d; box-shadow: 0 0 0 2px rgba(244,90,141,.12), 0 0 16px 3px rgba(244,90,141,.2), 0 8px 24px rgba(46,57,84,.16); backdrop-filter: blur(16px) saturate(150%); font: inherit; font-size: 13px; font-weight: 650; cursor: pointer; opacity: .76; transition: background .22s ease, box-shadow .22s ease, transform .22s ease, opacity .22s ease; }
 #toggle:hover { opacity: 1; background: rgba(255,255,255,.94); box-shadow: 0 0 0 2px rgba(244,90,141,.16), 0 0 18px 4px rgba(244,90,141,.24), 0 10px 28px rgba(35,48,74,.22); transform: translateY(-1px); }
 #toggle .toggle-icon { width: 23px; height: 23px; flex: none; border-radius: 50%; object-fit: cover; }
-#fab { display: none; position: absolute; right: 0; bottom: 0; box-sizing: border-box; width: 48px; height: 48px; align-items: center; justify-content: center; gap: 0; padding: 6px; overflow: hidden; border: 0; border-radius: 50%; background: rgba(255,255,255,.48); color: #863b5d; box-shadow: 0 0 0 3px rgba(244,90,141,.16), 0 0 22px 8px rgba(244,90,141,.36); cursor: pointer; transition: width .22s ease, gap .22s ease, padding .22s ease, border-radius .22s ease, background .22s ease, box-shadow .22s ease; }
-#fab .fab-icon { width: 34px; height: 34px; flex: none; border-radius: 50%; object-fit: cover; }
-#fab .fab-label { max-width: 0; opacity: 0; overflow: hidden; white-space: nowrap; font-size: 13px; font-weight: 650; transition: max-width .22s ease, opacity .18s ease; }
-#fab:hover, #fab:focus-visible { width: 176px; justify-content: flex-start; gap: 9px; padding: 6px 12px 6px 6px; border-radius: 999px; background: rgba(255,255,255,.94); box-shadow: 0 0 0 2px rgba(244,90,141,.18), 0 0 20px 6px rgba(244,90,141,.28); }
-#fab:hover .fab-label, #fab:focus-visible .fab-label { max-width: 180px; opacity: 1; }
+#fab { display: none; position: absolute; right: 0; bottom: 0; box-sizing: border-box; width: max-content; min-width: 48px; max-width: 48px; height: 48px; align-items: center; justify-content: center; gap: 0; padding: 6px; overflow: hidden; border: 0; outline: none; border-radius: 50%; background: rgba(255,255,255,.48); color: #863b5d; box-shadow: 0 0 0 3px rgba(244,90,141,.16), 0 0 22px 8px rgba(244,90,141,.36); cursor: grab; touch-action: none; user-select: none; -webkit-user-drag: none; transition: max-width .28s cubic-bezier(.2,.8,.2,1), gap .28s cubic-bezier(.2,.8,.2,1), padding .28s cubic-bezier(.2,.8,.2,1), border-radius .28s cubic-bezier(.2,.8,.2,1), background .22s ease, box-shadow .22s ease; }
+#fab .fab-icon { width: 34px; height: 34px; flex: none; border-radius: 50%; object-fit: cover; pointer-events: none; -webkit-user-drag: none; }
+#fab .fab-label { max-width: 0; opacity: 0; overflow: hidden; white-space: nowrap; font-size: 13px; font-weight: 650; transition: max-width .28s cubic-bezier(.2,.8,.2,1), opacity .18s ease; }
+/* max-width 贴近提示条实际宽度，避免按钮先展开到内容宽度后停顿。 */
+#fab.fab-hover, #fab:focus-visible { max-width: 150px; justify-content: flex-start; gap: 9px; padding: 6px 12px 6px 6px; border-radius: 999px; background: rgba(255,255,255,.94); box-shadow: 0 0 0 2px rgba(244,90,141,.18), 0 0 20px 6px rgba(244,90,141,.28); }
+#fab.fab-hover .fab-label, #fab:focus-visible .fab-label { max-width: 180px; opacity: 1; }
+/* 按钮靠近左边缘时提示条改向右展开（方向由位置控制器写 data-fab-side）。 */
+:host([data-fab-side="right"]) #fab { left: 0; right: auto; }
 #main { padding: 6px 14px 14px; }
 #site-badge { display: inline-block; margin-bottom: 6px; padding: 2px 8px; border-radius: 99px; background: linear-gradient(135deg, #f45a8d, #d83f80); color: #fff; font-size: 10px; font-weight: 700; }
 #site-badge.youtube { background: linear-gradient(135deg, #ff4e45, #cc0000); }
@@ -276,8 +280,10 @@ function clearPanel() {
 // ---- 面板外壳：展开/收起 + 构建 ----------------------------------------------
 let panelAnimation = null;
 let fabAnimation = null;
+// 位置控制器（锚点记忆 / 拖拽 / 展开方向），ensurePanel 里随面板创建。
+let positionController = null;
 function setOpen(open, animate = false) {
-  const from = hostEl.getBoundingClientRect();
+  const from = ui.fab.getBoundingClientRect();
   localStorage.purrvid_show = open ? "show" : "hide";
   ui.content.classList.toggle("hide", !open);
   ui.fab.style.display = open ? "none" : (floatingEnabled ? "flex" : "none");
@@ -285,7 +291,7 @@ function setOpen(open, animate = false) {
   if (fabAnimation) { fabAnimation.cancel(); fabAnimation = null; }
   const reduceMotion = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
   if (!open) {
-    hostEl.style.cssText = "display:block;position:fixed;z-index:2147483647;right:12px;bottom:12px;left:auto;top:auto;margin:0;width:48px;height:48px;overflow:visible;border:0;background:transparent;box-shadow:none;";
+    hostEl.style.cssText = "display:block;position:fixed;z-index:2147483647;" + positionController.collapsedPosition() + ";margin:0;width:48px;height:48px;overflow:visible;border:0;background:transparent;box-shadow:none;";
     // 常驻关闭且面板收起时，整个宿主隐藏（不留悬浮按钮）。
     if (!floatingEnabled) hostEl.style.display = "none";
     if (animate && !reduceMotion && typeof ui.fab.animate === "function") {
@@ -297,22 +303,21 @@ function setOpen(open, animate = false) {
     }
     return;
   }
-  // 展开：与 B 站引擎一致的高度过渡（先量目标高度，再从收起态位移+缩放过渡）。
-  hostEl.style.cssText = "display:block;position:fixed;z-index:2147483647;right:16px;bottom:16px;left:auto;top:auto;margin:0;width:min(480px,calc(100vw - 32px));height:auto;max-height:min(78vh,640px);overflow:hidden;border:1px solid rgba(255,255,255,.82);border-radius:18px;background:rgba(255,255,255,.86);box-shadow:0 18px 60px rgba(35,48,74,.22);backdrop-filter:blur(20px);";
+  // 展开：先按锚点象限算面板落点（靠边/靠顶时反向展开并夹回视口），再做高度过渡。
+  hostEl.style.cssText = "display:block;position:fixed;z-index:2147483647;left:0;top:0;right:auto;bottom:auto;margin:0;width:min(480px,calc(100vw - 32px));height:auto;max-height:min(78vh,640px);overflow:hidden;border:1px solid rgba(255,255,255,.82);border-radius:18px;background:rgba(255,255,255,.86);box-shadow:0 18px 60px rgba(35,48,74,.22);backdrop-filter:blur(20px);";
   const measured = hostEl.getBoundingClientRect();
   hostEl.style.height = measured.height + "px";
+  const placement = positionController.placePanel(measured.width, measured.height);
   const target = hostEl.getBoundingClientRect();
   if (!animate || reduceMotion || typeof hostEl.animate !== "function") {
     hostEl.style.height = "auto";
     hostEl.style.overflow = "auto";
     return;
   }
-  const scaleX = from.width / Math.max(target.width, 1);
-  const scaleY = from.height / Math.max(target.height, 1);
   panelAnimation = hostEl.animate(
     [
-      { transform: "translate(" + (from.left - target.left) + "px," + (from.top - target.top) + "px) scale(" + scaleX + "," + scaleY + ")", transformOrigin: "top left", opacity: 0.82 },
-      { transform: "none", transformOrigin: "top left", opacity: 1 }
+      panelOpenStartFrame(from, target, placement),
+      { transform: "none", transformOrigin: placement.origin, opacity: 1 }
     ],
     { duration: 520, easing: "cubic-bezier(0.16,1,0.3,1)" }
   );
@@ -385,6 +390,7 @@ function ensurePanel() {
   fabIcon.className = "fab-icon";
   fabIcon.src = PAW_URL;
   fabIcon.alt = "";
+  fabIcon.draggable = false;
   const fabLabel = document.createElement("span");
   fabLabel.className = "fab-label";
   fabLabel.textContent = "打开星喵助手";
@@ -394,6 +400,8 @@ function ensurePanel() {
   ui = { content, toggle, fab, badge, title, controls, downloadList, status, logs, logConsole: createLogConsole(logs, { title: "解析日志" }) };
   ui.toggle.addEventListener("click", () => setOpen(false, true));
   ui.fab.addEventListener("click", () => setOpen(true, true));
+  attachDelayedHover(ui.fab);
+  positionController = createPositionController(hostEl, actions);
   setOpen(localStorage.purrvid_show === "show");
   return panelRoot;
 }

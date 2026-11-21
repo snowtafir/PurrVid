@@ -14,7 +14,7 @@ English · [简体中文](README.zh-CN.md) · [Changelog](CHANGELOG.md)
 ![Firefox 140+](https://img.shields.io/badge/Firefox-140%2B-FF7139?logo=firefoxbrowser&logoColor=white)
 ![Chrome 116+](https://img.shields.io/badge/Chrome-116%2B-4285F4?logo=googlechrome&logoColor=white)
 ![ffmpeg.wasm](https://img.shields.io/badge/ffmpeg-wasm-007808?logo=ffmpeg&logoColor=white)
-![Version](https://img.shields.io/badge/version-1.0.5-blue)
+![Version](https://img.shields.io/badge/version-1.0.6-blue)
 ![License: GPL v3](https://img.shields.io/badge/License-GPL%20v3-blue.svg)
 ![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen)
 
@@ -30,9 +30,9 @@ The whole project is plain ES modules (no bundler, no framework). One shared cod
 
 ## Features
 
-- **In-page panel** — a persistent floating button with a smooth expand / collapse animation; nothing leaves the page.
+- **In-page panel** — a persistent floating button with a smooth expand / collapse animation; nothing leaves the page. The button and the panel can be dragged anywhere within the viewport, and the dragged position is remembered.
 - **Generic sites** — automatic media sniffing surfaces HLS / DASH / direct links in the same panel.
-- **Bilibili** — videos and bangumi (anime), multi-part pages, quality follows the player. Three download modes: merge, separate, or hand off to the browser.
+- **Bilibili** — videos and bangumi (anime), multi-part pages, quality follows the player. Two download modes: merge (audio + video can also be saved individually), or hand off to the browser.
 - **YouTube** — HLS streams with quality / audio-track selection.
 - **Background downloads** — cross-origin HLS / direct resources are fetched by the extension background, bypassing page CORS / CSP; every download path shows byte-level progress and can be canceled in place.
 - **Muxing in the browser** — audio + video are merged locally with `ffmpeg.wasm`; no server involved.
@@ -76,8 +76,7 @@ Go to the [Releases page](https://github.com/snowtafir/PurrVid/releases), downlo
 
 | Mode | What it does |
 | --- | --- |
-| **Merge** | Muxes audio + video into a single MP4 locally (`ffmpeg.wasm`). |
-| **Separate** | Saves audio and video as independent files. |
+| **Merge** | Muxes audio + video into a single MP4 locally (`ffmpeg.wasm`); the same list also offers per-stream buttons to save audio / video individually. |
 | **Browser** | Hands the stream to the browser's own downloader — lowest memory use. |
 
 > Quality always follows the Bilibili player. Switching quality or episodes refreshes the panel automatically. While a merge / separate download is running, do not refresh or close the page.
